@@ -1,8 +1,6 @@
 import os
 import sys
 import numpy as np
-#import cupy as np
-
 import dask.array as da
 from dask_image.imread import imread
 import tifffile
@@ -60,8 +58,8 @@ def parse_filenames(images_folder):
             channel_data = organized_data.setdefault(channel_name, {})
             z_data = channel_data.setdefault(k, [])
             z_data.append({
-                'x_coordinate': i,
-                'y_coordinate': j,
+                'x_coord': i,
+                'y_coord': j,
                 'z_level': k,
                 'channel': channel_name,
                 'filename': filename  # You might want to keep the filename for loading later
@@ -72,78 +70,6 @@ def parse_filenames(images_folder):
     return channel_names, input_height, input_width, organized_data
 
 
-def pre_allocate_arrays(channels, input_height, input_width, organized_data, overlap=0):
-    max_i = max_j = max_z = 0
-    for channel_data in organized_data.values():
-        for z_data in channel_data.values():
-            for tile_info in z_data:
-                max_i = max(max_i, tile_info['x_coordinate'])
-                max_j = max(max_j, tile_info['y_coordinate'])
-                max_z = max(max_z, tile_info['z_level'])
-
-
-    max_x = (max_i + 1) * input_width - max_i * 2 * overlap
-    max_y = (max_j + 1) * input_height - max_j * 2 * overlap
-    # Pre-allocate dask arrays instead of numpy arrays
-    tczyx_shape = (1, len(channels), max_z + 1, (max_j + 1) * input_height, (max_i + 1) * input_width)
-    print("tczyx shape:", tczyx_shape)
-
-    tczyx_shape = (1, len(channels), max_z + 1, max_x, max_y)
-    print("tczyx shape:", tczyx_shape)
-
-    print("Pre-allocation completed.")
-    # Adjust chunks for optimal performance based on your system and dataset
-    chunks = (1, 1, 1, input_height, input_width)
-    stitched_images = da.zeros(tczyx_shape, dtype=np.uint16, chunks=chunks)
-    return stitched_images
-
-def pre_allocate_canvas(channels, input_height, input_width, organized_data, horizontal_shift, vertical_shift):
-    max_i = max_j = max_z = 0
-    for channel_data in organized_data.values():
-        for z_data in channel_data.values():
-            for tile_info in z_data:
-                max_i = max(max_i, tile_info['x_coordinate'])
-                max_j = max(max_j, tile_info['y_coordinate'])
-                max_z = max(max_z, tile_info['z_level'])
-    #max_x =  (image_width - shift_x_horizontal) * (num_x - 1) + image_width + ((num_y - 1) *  shift_x_vertical)
-    
-    print(vertical_shift, horizontal_shift)
-
-    max_x =  input_width + (max_i * (input_width - horizontal_shift[1])) + (max_j * vertical_shift[1])
-    max_y = input_height + (max_j * (input_height - vertical_shift[0])) + (max_i * horizontal_shift[0])
-    print(max_y, max_x)
-    # Pre-allocate dask arrays instead of numpy arrays
-    tczyx_shape = (1, len(channels), max_z + 1, (max_j + 1) * input_height, (max_i + 1) * input_width)
-    print("tczyx shape:", tczyx_shape)
-
-    tczyx_shape = (1, len(channels), max_z + 1, max_x, max_y)
-    print("tczyx shape:", tczyx_shape)
-
-    print("Pre-allocation completed.")
-    # Adjust chunks for optimal performance based on your system and dataset
-    chunks = (1, 1, 1, input_height, input_width)
-    stitched_images = da.zeros(tczyx_shape, dtype=np.uint16, chunks=chunks)
-    return stitched_images
-
-#def stitch_images(images, organized_data, stitched_images, channel_map, input_height, input_width, overlap=0):
-#    print(channel_map)
-#    for channel, channel_data in organized_data.items():
-#        channel_idx = channel_map.get(channel)
-#        for z_level, z_data in channel_data.items():
-#            for tile_info in z_data:
-#                # Load tile image
-#                tile = imread(os.path.join(images, tile_info['filename']))
-#                # Compute coordinates in stitched image
-#                x = tile_info['x_coordinate'] * input_width
-#                y = tile_info['y_coordinate'] * input_height
-#                print("adding image to channel:", channel_idx, ",\tz_level:", z_level, ",\ty range:", y, y+input_height, ",\tx range:", x, x+input_width)
-#                # Stitch tile into stitched image
-#                # Use Dask array slicing and assignment
-#                stitched_images[0, channel_idx, z_level, y:y+input_height, x:x + input_width] = tile.compute()
-#
-#    print("Image stitching completed.")
-#    return stitched_images
-
 def calculate_horizontal_shift(img1_path, img2_path, max_overlap):
     """
     Calculate the horizontal overlap between two images using phase cross-correlation.
@@ -152,22 +78,18 @@ def calculate_horizontal_shift(img1_path, img2_path, max_overlap):
     :return: Overlap in pixels in the horizontal direction.
     """
     img1 = imread(img1_path)[0]
-    img2 = imread(img2_path)[0] # ,cv2.IMREAD_GRAYSCALE)
+    img2 = imread(img2_path)[0] 
 
-    # Assume overlap is approximate to estimate initial region of interest
     img1_roi = img1[:, -max_overlap:]  # Right side of the first image
     img2_roi = img2[:, :max_overlap]   # Left side of the second image
-    print(img1.shape)
+    print("registration region shape: ", img1_roi.shape)
     
-    # pixel precision first
-    # align_shift, error, diffphase = registration.phase_cross_correlation(image, offset_image)
-
     align_shift, error, diffphase = registration.phase_cross_correlation(img1_roi, img2_roi) #, upsample_factor=10)
 
     print("horizontal align_shift", align_shift)
     shift_adjacent = [align_shift[0], align_shift[1] - img1_roi.shape[1]]
 
-    print("horizaontal shift_adjacent", shift_adjacent)
+    print("horizontal shift_adjacent", shift_adjacent)
     # Apply the shift to the moving image
     shifted_img2 = nd_shift(img2, shift=shift_adjacent)
 
@@ -187,7 +109,7 @@ def calculate_horizontal_shift(img1_path, img2_path, max_overlap):
 
     # Return the estimated shift
     #return int(-shift_adjacent[1]//2)
-    return [-int(x) for x in shift_adjacent]
+    return int(shift_adjacent[0]), int(shift_adjacent[1]) 
 
 
 def calculate_vertical_shift(img1_path, img2_path, max_overlap):
@@ -198,13 +120,11 @@ def calculate_vertical_shift(img1_path, img2_path, max_overlap):
     :return: Overlap in pixels in the horizontal direction.
     """
     img1 = imread(img1_path)[0]
-    img2 = imread(img2_path)[0]#, cv2.IMREAD_GRAYSCALE)
+    img2 = imread(img2_path)[0]
 
-    # Assume overlap is approximate to estimate initial region of interest
     img1_roi = img1[-max_overlap:,:]  # Right side of the first image
     img2_roi = img2[:max_overlap, :]   # Left side of the second image
 
-    
     align_shift, error, diffphase = registration.phase_cross_correlation(img1_roi, img2_roi)#, upsample_factor=10)
 
     print("vertical align_shift", align_shift)
@@ -229,15 +149,41 @@ def calculate_vertical_shift(img1_path, img2_path, max_overlap):
     plt.show()
 
     # Return the estimated shift
-    #return int(-shift_adjacent[0]//2)
-    return [-int(x) for x in shift_adjacent]
+    return int(shift_adjacent[0]), int(shift_adjacent[1])
+
+def pre_allocate_canvas(channels, input_height, input_width, organized_data, horizontal_shift, vertical_shift):
+    max_i = max_j = max_z = 0
+    for channel_data in organized_data.values():
+        for z_data in channel_data.values():
+            for tile_info in z_data:
+                max_i = max(max_i, tile_info['x_coord'])
+                max_j = max(max_j, tile_info['y_coord'])
+                max_z = max(max_z, tile_info['z_level'])
+
+    # Pre-allocate dask arrays instead of numpy arrays
+    tczyx_shape = (1, len(channels), max_z + 1, (max_j + 1) * input_height, (max_i + 1) * input_width)
+    print("no overlap tczyx shape:", tczyx_shape)
+
+    max_x =  input_width + (max_i * (input_width + horizontal_shift[1])) + (max_j * abs(vertical_shift[1]))
+    max_y = input_height + (max_j * (input_height + vertical_shift[0])) + (max_i * abs(horizontal_shift[0]))
+    tczyx_shape = (1, len(channels), max_z + 1, max_y, max_x)
+    print("final tczyx shape:", tczyx_shape)
+
+  
+    # Adjust chunks for optimal performance based on your system and dataset
+    chunks = (1, 1, 1, max_y, max_x)
+    print("chunks shape:", chunks)
+    stitched_images = da.zeros(tczyx_shape, dtype=np.uint16, chunks=chunks)
+    print("Pre-allocation completed.")
+    return stitched_images
+
 
 def stitch_images_overlap(images, organized_data, stitched_images, channel_map, input_height, input_width, v_shift, h_shift):
-    print(channel_map)
-    # Determine the max coordinates if not directly provided
-    max_x_coordinate = max(tile_info['x_coordinate'] for channel_data in organized_data.values() for z_data in channel_data.values() for tile_info in z_data)
-    max_y_coordinate = max(tile_info['y_coordinate'] for channel_data in organized_data.values() for z_data in channel_data.values() for tile_info in z_data)
 
+    # Determine the max coordinates if not directly provided
+    max_col = max(tile_info['x_coord'] for channel_data in organized_data.values() for z_data in channel_data.values() for tile_info in z_data)
+    max_row = max(tile_info['y_coord'] for channel_data in organized_data.values() for z_data in channel_data.values() for tile_info in z_data)
+                
     for channel, channel_data in organized_data.items():
         channel_idx = channel_map.get(channel)
         for z_level, z_data in channel_data.items():
@@ -245,44 +191,22 @@ def stitch_images_overlap(images, organized_data, stitched_images, channel_map, 
                 # Load the tile image
                 tile = imread(os.path.join(images, tile_info['filename']))[0]
                 print("tile shape:", tile.shape)
-                
-                # Crop boundaries handling based on tile position
-                is_left_edge = tile_info['x_coordinate'] == 0
-                is_right_edge = tile_info['x_coordinate'] == max_x_coordinate
-                is_top_edge = tile_info['y_coordinate'] == 0
-                is_bottom_edge = tile_info['y_coordinate'] == max_y_coordinate
+                col = tile_info['x_coord']
+                row = tile_info['y_coord']
 
-                crop_x_start = 0 if is_left_edge else overlap
-                crop_x_end = tile.shape[-1] - (0 if is_right_edge else overlap)
-                crop_y_start = 0 if is_top_edge else overlap
-                crop_y_end = tile.shape[-2] - (0 if is_bottom_edge else overlap)
-                
-                cropped_tile = tile[crop_y_start:crop_y_end, crop_x_start:crop_x_end]
-                # cropped_tile = tile[0,crop_y_start:crop_y_end, crop_x_start:crop_x_end]
-                print("cropped tile shape:", cropped_tile.shape)
-                # Compute the placement coordinates, adjusting for overlaps
-                if tile_info['x_coordinate'] == 0:
-                    x_start = 0
-                else:
-                    x_start = (input_width - 2 * overlap) * tile_info['x_coordinate'] + overlap
+                x_start = (input_width + h_shift[1]) * col + row * v_shift[1]
+                y_start = (input_height + v_shift[0]) * row - (max_col - col) * h_shift[0]
+                x_end = x_start + tile.shape[-1]
+                y_end = y_start + tile.shape[-2]
 
-                if tile_info['y_coordinate'] == 0:
-                    y_start = 0
-                else:
-                    y_start = (input_height - 2 * overlap) * tile_info['y_coordinate'] + overlap
-                
-                x_end = x_start + cropped_tile.shape[-1]
-                y_end = y_start + cropped_tile.shape[-2]
-                
-                print(f"Placing cropped image: C:{channel_idx}, Z:{z_level}, Y:{tile_info['y_coordinate']}, X:{tile_info['x_coordinate']}")
+                print(f"Placing Tile: C:{channel_idx}, Z:{z_level}, Y:{row}, X:{col}")
                 print(f"Attempting to place cropped tile into stitched image...")
                 print(f"  Target slice indices: Y {y_start}-{y_end}, X {x_start}-{x_end}")
-                print(f"  Cropped tile shape: {cropped_tile.shape}")
                 print(f"  Target slice shape in stitched_images: {(y_end - y_start, x_end - x_start)}")
                 print(f"  Expected shape in stitched_images based on indices: {stitched_images[0, channel_idx, z_level, y_start:y_end, x_start:x_end].shape}")
-
+                
                 # Stitch the cropped tile into the stitched image
-                stitched_images[0, channel_idx, z_level, y_start:y_end, x_start:x_end] = cropped_tile.compute()
+                stitched_images[0, channel_idx, z_level, y_start:y_end, x_start:x_end] = tile.compute()
 
     print("Image stitching completed.")
     return stitched_images
@@ -292,9 +216,10 @@ def save_as_ome_tiff(stitched_images, output_path, channel_names, dz_um, sensor_
     data_shapes = [stitched_images.shape]  # Assuming a single image data shape
     data_types = [stitched_images.dtype]  # Assuming a single data type
     
+    print("(T, C, Z, Y, X,)")
     print(data_shapes)
     print(data_types)
-    # print(len(data_shapes), len(data_types),len(["TCZYX"]), len([list(channel_names)]))
+    print(list(channel_names))
     # Generating OME metadata
     ome_metadata = OmeTiffWriter.build_ome(
         image_name=["Stitched Scans"],
@@ -302,7 +227,6 @@ def save_as_ome_tiff(stitched_images, output_path, channel_names, dz_um, sensor_
         data_types=data_types,
         dimension_order=["TCZYX"],  # Adjust based on your data
         channel_names=[list(channel_names)],
-        #physical_pixel_sizes=[types.PhysicalPixelSizes(Z=1.5,Y=1.85, X=1.85)],
         physical_pixel_sizes=[types.PhysicalPixelSizes(dz_um, sensor_pixel_size_um, sensor_pixel_size_um)]
         # Add more metadata as needed, such as physical_pixel_sizes or image_name
     )
@@ -317,32 +241,30 @@ def save_as_ome_tiff(stitched_images, output_path, channel_names, dz_um, sensor_
     print("OME-TIFF saved successfully with metadata.")
 
 # Main function to orchestrate the process
-def main(dataset_path, output_path, overlap = 0):
+def main(dataset_path, output_path):
     img_folder_path = os.path.join(dataset_path, '0') # Update this path
     xml_file_path = os.path.join(dataset_path, 'configurations.xml')
     json_file_path = os.path.join(dataset_path, 'acquisition parameters.json')
+
     selected_modes = extract_selected_modes_from_xml(xml_file_path)
     acquisition_params = extract_acquisition_parameters_from_json(json_file_path)
-
     print(selected_modes)
     print(acquisition_params)
+
     channel_names, h, w, organized_data = parse_filenames(img_folder_path)
     channel_map = {channel_name: idx for idx, channel_name in enumerate(channel_names)}
-    print(channel_map)
 
     channel_0 = list(channel_names)[0]
-
     img1_path = os.path.join(img_folder_path, f"0_0_0_{channel_0}.tiff")
     img2_path_horizontal = os.path.join(img_folder_path, f"0_1_0_{channel_0}.tiff")
     img2_path_vertical = os.path.join(img_folder_path, f"1_0_0_{channel_0}.tiff")
-
     max_overlap = 128
-    
     vertical_shift = calculate_vertical_shift(img1_path, img2_path_vertical, max_overlap)
     horizontal_shift = calculate_horizontal_shift(img1_path, img2_path_horizontal, max_overlap)
+    print("h_shift(y,x):", horizontal_shift)
+    print("v_shift(y,x):", vertical_shift)
 
     stitched_images = pre_allocate_canvas(channel_names, h, w, organized_data, vertical_shift, horizontal_shift)
-    #stitched_images = pre_allocate_arrays(channel_names, h, w, organized_data, x_overlap)
     stitched_images = stitch_images_overlap(img_folder_path, organized_data, stitched_images, channel_map, h, w, vertical_shift, horizontal_shift)
 
     dz_um = acquisition_params["dz(um)"]
@@ -354,13 +276,9 @@ if __name__ == "__main__":
     if len(sys.argv) < 3:
         print("Usage: python3 stitcher.py <input_folder> <output_name>")
         sys.exit(1)
-    overlap = 0
-    if len(sys.argv) == 4:
-        overlap = int(sys.argv[3])
     dataset_path = sys.argv[1]
-    # img_folder_path = sys.argv[1]
     output_folder_path = os.path.join(dataset_path, "stitched")
     if not os.path.exists(output_folder_path):
         os.makedirs(output_folder_path)
     output_path = os.path.join(output_folder_path, sys.argv[2]) 
-    main(dataset_path, output_path, overlap)
+    main(dataset_path, output_path)
