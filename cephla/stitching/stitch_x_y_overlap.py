@@ -32,7 +32,7 @@ def calculate_horizontal_overlap(img1_path, img2_path, max_overlap):
     # Assume overlap is approximate to estimate initial region of interest
     img1_roi = img1[:, -max_overlap:]  # Right side of the first image
     img2_roi = img2[:, :max_overlap]   # Left side of the second image
-    print(img1.shape)
+    print(img1_roi.shape)
     
     # pixel precision first
     # shift, error, diffphase = registration.phase_cross_correlation(image, offset_image)
@@ -184,12 +184,11 @@ def pre_allocate_arrays(channels, input_height, input_width, organized_data, x_o
 
     max_y = (max_j + 1) * (input_height - 2 * y_overlap) + 2 * y_overlap
 
-    print(max_x, max_y)
     # Pre-allocate dask arrays instead of numpy arrays
-    tczyx_shape = (1, len(channels), max_z + 1, max_x, max_y)
+    tczyx_shape = (1, len(channels), max_z + 1, max_y, max_x)
     print("tczyx shape:", tczyx_shape)
 
-    tczyx_shape = (1, len(channels), max_z + 1, max_x, max_y)
+    tczyx_shape = (1, len(channels), max_z + 1, max_y, max_x)
     print("tczyx shape:", tczyx_shape)
 
     print("Pre-allocation completed.")
@@ -218,7 +217,7 @@ def stitch_images(images, organized_data, stitched_images, channel_map, input_he
     print("Image stitching completed.")
     return stitched_images
 
-def stitch_images_overlap(images, organized_data, stitched_images, channel_map, input_height, input_width, max_i, max_j, x_overlap=0, y_overlap=0):
+def stitch_images_overlap(images, organized_data, stitched_images, channel_map, input_height, input_width, max_i, max_j, x_overlap, y_overlap):
     for channel, channel_data in organized_data.items():
         channel_idx = channel_map.get(channel)
         for z_level, z_data in channel_data.items():
@@ -330,7 +329,7 @@ def main(dataset_path, output_path):
     img2_path_horizontal = os.path.join(img_folder_path, f"0_1_0_{channel_names[0]}.tiff")
     img2_path_vertical = os.path.join(img_folder_path, f"1_0_0_{channel_names[0]}.tiff")
     
-    max_overlap = 2048
+    max_overlap = 128
     # Inside your main function or where appropriate
     horizontal_overlap = calculate_horizontal_overlap(img1_path, img2_path_horizontal, max_overlap)
     print(f"Estimated horizontal overlap is: {horizontal_overlap} pixels")
