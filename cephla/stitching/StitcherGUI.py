@@ -13,26 +13,26 @@ class StitchingThread(QThread):
     saving_started = pyqtSignal()
     saving_finished = pyqtSignal()
 
-    def __init__(self, input_folder, config_folder, output_name, use_registration, max_overlap, has_config_files):
+    def __init__(self, input_folder, output_name, use_registration, max_overlap):
         super().__init__()
         # Initialize Stitcher with the required attributes
-        self.stitcher = Stitcher(input_folder=input_folder, output_name=output_name, max_overlap=max_overlap)
-        self.config_folder = config_folder
-        self.has_config_files = has_config_files
+        self.input_folder = input_folder
+        image_dir_path = os.path.join(self.input_folder, '0')
+        if not os.path.isdir(image_dir_path):
+            raise Exception(f"{input_folder}/0 is not a valid directory")
+        self.stitcher = Stitcher(image_folder=image_dir_path, output_name=output_name, max_overlap=max_overlap)
         self.use_registration = use_registration
 
     def run(self):
         try:
-            if self.has_config_files:
-                xml_file_path = os.path.join(self.config_folder, 'configurations.xml')
-                json_file_path = os.path.join(self.config_folder, 'acquisition parameters.json')
-                self.stitcher.extract_selected_modes_from_xml(xml_file_path)
-                self.stitcher.extract_acquisition_parameters_from_json(json_file_path)
-            
+            configs_path = os.path.join(self.input_folder, 'configurations.xml')
+            acquistion_params_path = os.path.join(self.input_folder, 'acquisition parameters.json')
+            self.stitcher.extract_selected_modes_from_xml(configs_path)
+            self.stitcher.extract_acquisition_parameters_from_json(acquistion_params_path)
             self.stitcher.parse_filenames()
 
             if self.use_registration:
-                v_shifts, h_shifts = self.stitcher.calculate_shifts()
+                v_shifts, h_shifts = self.stitcher.calculate_shifts_z()
                 self.stitcher.pre_allocate_canvas(v_shifts, h_shifts)
                 self.stitcher.stitch_images_overlap(v_shifts, h_shifts, progress_callback=self.update_progress.emit)
             else:
@@ -60,15 +60,10 @@ class StitchingGUI(QWidget):
         self.layout = QVBoxLayout(self)
         
         # Input folder selection
-        self.inputFolderBtn = QPushButton('Select Input Image Folder', self)
-        self.inputFolderBtn.clicked.connect(self.selectInputFolder)
-        self.layout.addWidget(self.inputFolderBtn)
+        self.inputDirectoryBtn = QPushButton('Select Input Images Dataset Directory', self)
+        self.inputDirectoryBtn.clicked.connect(self.selectInputDirectory)
+        self.layout.addWidget(self.inputDirectoryBtn)
 
-        # Checkbox for selecting config files
-        self.configFolder = None
-        self.configCheckBox = QCheckBox("Provide Configurations and Acquisition Parameters", self)
-        self.configCheckBox.toggled.connect(self.onConfigCheckBox)
-        self.layout.addWidget(self.configCheckBox)
 
         # Checkbox for registering images when stitching
         self.useRegistrationCheck = QCheckBox('Align Image Edges When Stitching', self)
@@ -78,6 +73,7 @@ class StitchingGUI(QWidget):
         # Label to show selected max overlap after input dialog
         self.maxOverlapLabel = QLabel('Align Image Edges Selected: ', self)
         self.layout.addWidget(self.maxOverlapLabel)
+        self.maxOverlap = None
         self.maxOverlapLabel.hide()  # Hide initially
 
         # Output name entry
@@ -102,23 +98,11 @@ class StitchingGUI(QWidget):
         self.setWindowTitle('Image Stitcher')
         self.setGeometry(300, 300, 400, 200)
 
-    def selectInputFolder(self):
-        self.inputFolder = QFileDialog.getExistingDirectory(self, "Select Input Image Folder")
-        if self.inputFolder: 
-            self.inputFolderBtn.setText(f'Selected: {self.inputFolder}')
+    def selectInputDirectory(self):
+        self.inputDirectory = QFileDialog.getExistingDirectory(self, "Select Input Image Folder")
+        if self.inputDirectory: 
+            self.inputDirectoryBtn.setText(f'Selected: {self.inputDirectory}')
             self.statusLabel.setText('Status: Input images folder selected')
-
-    def onConfigCheckBox(self, checked):
-        if checked:
-            self.configFolder = QFileDialog.getExistingDirectory(self, "Select Configuration Folder")
-            if self.configFolder:
-                self.configCheckBox.setText(f'Configurations and Acquisition Parameters Folder: {self.configFolder}')
-                self.statusLabel.setText('Status: Acquisition parameters folder selected')
-            else:
-                # User canceled the selection, uncheck the checkbox
-                self.configCheckBox.setChecked(False)
-        else:
-            self.configFolder = None
 
     def onRegistrationCheck(self, checked):
         if checked:
@@ -137,9 +121,8 @@ class StitchingGUI(QWidget):
     def startStitching(self):
         output_name = self.outputNameEdit.text().strip()
         use_registration = self.useRegistrationCheck.isChecked()
-        has_config_files = self.configCheckBox.isChecked()
 
-        if not self.inputFolder or not output_name:
+        if not self.inputDirectory or not output_name:
             QMessageBox.warning(self, "Input Error", "Please select an input image folder and specify an output name.")
             return
         if use_registration and (not self.maxOverlap or self.maxOverlap < 0):
@@ -150,7 +133,7 @@ class StitchingGUI(QWidget):
         self.statusLabel.setText('Status: Starting stitching...')
 
         # Create and start the stitching thread
-        self.thread = StitchingThread(self.inputFolder, self.configFolder, output_name, use_registration, self.maxOverlap, has_config_files)
+        self.thread = StitchingThread(self.inputDirectory, output_name, use_registration, self.maxOverlap)
         self.thread.update_progress.connect(self.updateProgressBar)
         self.thread.error_occurred.connect(self.showError)
         self.thread.saving_started.connect(self.savingStarted)
@@ -164,21 +147,17 @@ class StitchingGUI(QWidget):
 
     def stitchingFinished(self):
         self.statusLabel.setText('Status: Done stitching!')
-        # Reset the config folder selection and checkbox
-        self.configFolder = None
-        self.configCheckBox.setChecked(False)
-        self.configCheckBox.setText("Provide Configurations and Acquisition Parameters")
         
         # Reset the use registration checkbox
         self.useRegistrationCheck.setChecked(False)
         self.maxOverlapLabel.hide()
+        self.maxOverlap = None
         
         # Reset the max overlap label and value
-        self.maxOverlap = None
-        self.maxOverlapLabel.setText('Max Overlap Between Adjacent Images: ')
+        #self.maxOverlapLabel.setText('Max Overlap Between Adjacent Images: ')
         
         # Optionally, clear the input folder selection and output name
-        #self.inputFolderBtn.setText('Select Input Image Folder')
+        #self.inputDirectoryBtn.setText('Select Input Image Folder')
         #self.outputNameEdit.clear()
         
         # You could also reset the progress bar here if you want

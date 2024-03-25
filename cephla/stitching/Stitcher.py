@@ -11,14 +11,14 @@ from skimage import io, registration
 from scipy.ndimage import shift as nd_shift
 
 class Stitcher:
-    def __init__(self, input_folder='', output_name='', max_overlap=0):
+    def __init__(self, image_folder='', output_name='', max_overlap=0):
         self.selected_modes = {}
         self.acquisition_params = {}
         self.channel_names = []
         self.organized_data = {}
         self.stitched_images = None
         self.dtype = np.uint16
-        self.image_folder = input_folder
+        self.image_folder = image_folder
         output_folder_path = os.path.join(self.image_folder, "stitched")
         if not os.path.exists(output_folder_path):
             os.makedirs(output_folder_path)
@@ -53,14 +53,13 @@ class Stitcher:
         first_image = None
         for filename in os.listdir(self.image_folder):
             if filename.endswith(".tiff") or filename.endswith(".bmp"):
-                first_image = imread(os.path.join(self.image_folder, filename)).compute()
+                first_image = imread(os.path.join(self.image_folder, filename)) #.compute()
                 self.dtype = first_image.dtype
                 self.input_height, self.input_width = first_image.shape[-2:]
                 break
 
         for filename in os.listdir(self.image_folder):
-            if filename.endswith(".bmp"):
-
+            if filename.endswith(".bmp") or filename.endswith("Ex.tiff"):
                 _, i, j, k, channel_name = os.path.splitext(filename)[0].split('_', 4) 
                 i, j, k = int(i), int(j), int(k)
                 channel_names.add(channel_name)
@@ -127,6 +126,35 @@ class Stitcher:
             break  # shifts are consistent across all channels
         return vertical_shifts, horizontal_shifts
 
+    def calculate_shifts_z(self):
+        vertical_shifts = {}
+        horizontal_shifts = {}
+        print(self.organized_data[self.channel_names[0]][0])
+        for z_level, z_data in self.organized_data[self.channel_names[0]].items():
+            img1_path = img2_path_vertical = img2_path_horizontal = None
+            for tile_info in z_data:
+                if tile_info['col'] == 0 and tile_info['row'] == 0:
+                    img1_path = os.path.join(self.image_folder, tile_info['filename'])
+                elif tile_info['col'] == 0 and tile_info['row'] == 1:
+                    img2_path_vertical = os.path.join(self.image_folder, tile_info['filename'])
+                elif tile_info['col'] == 1 and tile_info['row'] == 0:
+                    img2_path_horizontal = os.path.join(self.image_folder, tile_info['filename'])
+
+            if img1_path == None:
+                raise Exception("no input file found for c:0 z:0 y:0 x:0")
+            if img2_path_vertical == None:
+                v_shift = (0,0)
+            else:
+                v_shift = self.calculate_vertical_shift(img1_path, img2_path_vertical)
+            if img2_path_horizontal == None:
+                h_shift = (0,0)
+            else:
+                h_shift = self.calculate_horizontal_shift(img1_path, img2_path_horizontal)
+            print(v_shift, h_shift)
+            vertical_shifts[z_level] = v_shift
+            horizontal_shifts[z_level] = h_shift
+        return vertical_shifts, horizontal_shifts
+
     def pre_allocate_arrays(self):
         max_i = max_j = max_z = 0
         for channel_data in self.organized_data.values():
@@ -149,8 +177,8 @@ class Stitcher:
         #print((1, len(self.channel_names), max_z + 1, max_j + 1, max_i + 1))
         max_x = max_y = 0
         for z_level in range(max_z + 1):
-            max_x_z = self.input_width + (max_i * (self.input_width - horizontal_shift[z_level][1])) + abs(max_j * vertical_shift[z_level][1])
-            max_y_z = self.input_height + (max_j * (self.input_height - vertical_shift[z_level][0])) + abs(max_i * horizontal_shift[z_level][0])
+            max_x_z = self.input_width + (max_i * (self.input_width + horizontal_shift[z_level][1])) + abs(max_j * vertical_shift[z_level][1])
+            max_y_z = self.input_height + (max_j * (self.input_height + vertical_shift[z_level][0])) + abs(max_i * horizontal_shift[z_level][0])
             max_x = max(max_x, max_x_z)
             max_y = max(max_y, max_y_z)
         tczyx_shape = (1, len(self.channel_names), max_z + 1, max_y, max_x)
@@ -166,7 +194,7 @@ class Stitcher:
         for channel_idx, channel in enumerate(self.channel_names):
             for z_level, z_data in self.organized_data[channel].items():
                 for tile_info in z_data:
-                    tile = imread(os.path.join(self.image_folder, tile_info['filename']))[0].compute()
+                    tile = imread(os.path.join(self.image_folder, tile_info['filename']))[0] #.compute()
                     col, row = tile_info['col'], tile_info['row']
                     x = col * self.input_width 
                     y = row * self.input_height
@@ -185,7 +213,7 @@ class Stitcher:
             for z_level, z_data in self.organized_data[channel].items():
                 for tile_info in z_data:
                     # Load the tile image
-                    tile = imread(os.path.join(self.image_folder, tile_info['filename']))[0]
+                    tile = imread(os.path.join(self.image_folder, tile_info['filename']))[0] #.compute()
                     col = tile_info['col']
                     row = tile_info['row'] 
                     if h_shift[z_level][0] > 0:
@@ -198,7 +226,7 @@ class Stitcher:
                     else:
                         y = (self.input_height + v_shift[z_level][0]) * row + col * h_shift[z_level][0]
 
-                    self.stitched_images[0, channel_idx, z_level, y:y+tile.shape[-2], x:x+tile.shape[-1]] = tile.compute()
+                    self.stitched_images[0, channel_idx, z_level, y:y+tile.shape[-2], x:x+tile.shape[-1]] = tile #.compute()
                     processed_tiles += 1
                     if progress_callback is not None:
                         progress_callback(processed_tiles, total_tiles)
