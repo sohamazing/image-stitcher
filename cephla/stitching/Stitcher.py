@@ -58,6 +58,9 @@ class Stitcher:
     def parse_filenames(self):
         self.organized_data = {}
         channel_names = set()
+        max_k = 0
+        max_j = 0
+        max_i = 0
         
         # Read the first image to get its dimensions
         first_image = None
@@ -68,9 +71,6 @@ class Stitcher:
                 self.input_height, self.input_width = first_image.shape[-2:]
                 break
 
-        max_k = 0
-        max_j = 0
-        max_i = 0
         for filename in os.listdir(self.image_folder):
             k = None
             if filename.endswith(".bmp") or filename.endswith("Ex.tiff"):
@@ -158,13 +158,15 @@ class Stitcher:
 
     def pre_allocate_grid(self):
         tczyx_shape = (1, len(self.channel_names),  self.num_z, self.num_rows * self.input_height, self.num_cols * self.input_width)
-        self.stitched_images = da.zeros(tczyx_shape, dtype=self.dtype, chunks=(1, 1, 1, self.input_height, self.input_width))
+        chunks = (1, 1, 1, self.input_height, self.input_width)
+        self.stitched_images = da.zeros(tczyx_shape, dtype=self.dtype, chunks=chunks)
 
     def pre_allocate_canvas(self, vertical_shift, horizontal_shift):
         max_x = self.input_width + ((self.num_cols - 1) * (self.input_width + horizontal_shift[1])) + abs((self.num_rows - 1) * vertical_shift[1])
         max_y = self.input_height + ((self.num_rows - 1) * (self.input_height + vertical_shift[0])) + abs((self.num_cols - 1) * horizontal_shift[0])
         tczyx_shape = (1, len(self.channel_names), self.num_z, max_y, max_x)
-        self.stitched_images = da.zeros(tczyx_shape, dtype=self.dtype, chunks=(1, 1, 1, max_y, max_x))
+        chunks = (1, 1, 1, max_y, max_x)
+        self.stitched_images = da.zeros(tczyx_shape, dtype=self.dtype, chunks=chunks)
 
     def stitch_images(self, progress_callback=None):
         total_tiles = sum(len(z_data) for channel_data in self.organized_data.values() for z_data in channel_data.values())
@@ -264,5 +266,5 @@ class Stitcher:
             channel_names=self.channel_names,
             channel_colors=channel_colors,
             dimension_order="TCZYX",
-            #chunk_dims=(1, 1, 1, max_y, max_x)
+            chunk_dims=(1, 1, 1, max_y, max_x)
         )
