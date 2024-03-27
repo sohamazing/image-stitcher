@@ -106,7 +106,7 @@ class StitchingGUI(QWidget):
         self.zLevelInput.hide()
 
         # Label to show selected channel
-        self.channelDropdownLabel = QLabel(f'Select Channel for Registration: ', self)
+        self.channelDropdownLabel = QLabel('Select Channel for Registration: ', self)
         self.layout.addWidget(self.channelDropdownLabel)
         self.channelDropdownLabel.hide()
         self.channelDropdown = QComboBox(self)
@@ -160,6 +160,7 @@ class StitchingGUI(QWidget):
         if checked:
             if not self.inputDirectory:
                 QMessageBox.warning(self, "Input Error", "Please Select an Input Image Folder First")
+                self.useRegistrationCheck.setChecked(False)
                 return
             stitcher = Stitcher(input_folder=self.inputDirectory)  # Temp instance to parse filenames
             stitcher.parse_filenames()
@@ -172,14 +173,17 @@ class StitchingGUI(QWidget):
             else:
                 # User canceled the input dialog, uncheck the checkbox
                 self.useRegistrationCheck.setChecked(False)
+                return
 
             # Create z-level input
+            self.zLevelInputLabel.setText('Select Z-Level for Registration:')
             self.zLevelInputLabel.show()
             self.zLevelInput.setMinimum(0)  # Minimum z level
             self.zLevelInput.setMaximum(stitcher.num_z - 1)  # Maximum z level
             self.zLevelInput.show()
 
             # Create channel dropdown
+            self.channelDropdownLabel.setText('Select Channel for Registration:')
             self.channelDropdownLabel.show()
             self.channelDropdown.addItems(stitcher.channel_names)
             self.channelDropdown.show()
@@ -203,6 +207,7 @@ class StitchingGUI(QWidget):
             self.output_format = ".ome.zarr"
         
         use_registration = self.useRegistrationCheck.isChecked()
+        self.useRegistrationCheck.setEnabled(False)
 
         selected_z_level = self.zLevelInput.value() if self.zLevelInput else 0
         self.zLevelInputLabel.setText(f'Selected Z-Level for Registration: {selected_z_level}')
@@ -241,6 +246,7 @@ class StitchingGUI(QWidget):
     def stitchingFinished(self):
         self.statusLabel.setText('Status: Done Stitching!')
         # Reset the use registration checkbox
+        self.useRegistrationCheck.setEnabled(True)
         self.useRegistrationCheck.setChecked(False)
         self.maxOverlapLabel.hide()
         self.maxOverlap = None
