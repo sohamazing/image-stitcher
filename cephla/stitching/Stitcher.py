@@ -32,6 +32,8 @@ class Stitcher:
         self.num_t = 1
         self.num_z = 1
         self.num_c = 1
+        self.num_cols = 0
+        self.num_rows = 0
         self.input_height = 0
         self.input_width = 0
 
@@ -66,7 +68,9 @@ class Stitcher:
                 self.input_height, self.input_width = first_image.shape[-2:]
                 break
 
-        max_z = 0
+        max_k = 0
+        max_j = 0
+        max_i = 0
         for filename in os.listdir(self.image_folder):
             k = None
             if filename.endswith(".bmp") or filename.endswith("Ex.tiff"):
@@ -96,11 +100,17 @@ class Stitcher:
                     'filename': filename
                 })
             if k is not None:
-                max_z = max(max_z, k)
+                max_k = max(max_k, k)
+            if j is not None:
+                max_j = max(max_j, j)
+            if i is not None:
+                max_i = max(max_i, i)
         
         self.channel_names = sorted(list(channel_names))
         self.num_c = len(self.channel_names)
-        self.num_z = max_z + 1
+        self.num_z = max_k + 1
+        self.num_cols = max_j + 1
+        self.num_rows = max_i + 1
 
 
     def calculate_horizontal_shift(self, img1_path, img2_path, max_overlap):
@@ -147,48 +157,28 @@ class Stitcher:
         return v_shift, h_shift
 
     def pre_allocate_grid(self):
-        max_i = max_j = max_z = 0
-        for channel_data in self.organized_data.values():
-            for z_data in channel_data.values():
-                for tile_info in z_data:
-                    max_i = max(max_i, tile_info['col'])
-                    max_j = max(max_j, tile_info['row'])
-                    max_z = max(max_z, tile_info['z_level'])
-        tczyx_shape = (1, len(self.channel_names), max_z + 1, (max_j + 1) * self.input_height, (max_i + 1) * self.input_width)
+        tczyx_shape = (1, len(self.channel_names),  self.num_z, self.num_rows * self.input_height, self.num_cols * self.input_width)
         self.stitched_images = da.zeros(tczyx_shape, dtype=self.dtype, chunks=(1, 1, 1, self.input_height, self.input_width))
 
     def pre_allocate_canvas(self, vertical_shift, horizontal_shift):
-        max_i = max_j = max_z = 0
-        for channel_data in self.organized_data.values():
-            for z_data in channel_data.values():
-                for tile_info in z_data:
-                    max_i = max(max_i, tile_info['col'])
-                    max_j = max(max_j, tile_info['row'])
-                    max_z = max(max_z, tile_info['z_level'])
-        #print((1, len(self.channel_names), max_z + 1, max_j + 1, max_i + 1))
-        max_x = max_y = 0
-        for z_level in range(max_z + 1):
-            max_x_z = self.input_width + (max_i * (self.input_width + horizontal_shift[1])) + abs(max_j * vertical_shift[1])
-            max_y_z = self.input_height + (max_j * (self.input_height + vertical_shift[0])) + abs(max_i * horizontal_shift[0])
-            max_x = max(max_x, max_x_z)
-            max_y = max(max_y, max_y_z)
-        tczyx_shape = (1, len(self.channel_names), max_z + 1, max_y, max_x)
+        max_x = self.input_width + ((self.num_cols - 1) * (self.input_width + horizontal_shift[1])) + abs((self.num_rows - 1) * vertical_shift[1])
+        max_y = self.input_height + ((self.num_rows - 1) * (self.input_height + vertical_shift[0])) + abs((self.num_cols - 1) * horizontal_shift[0])
+        tczyx_shape = (1, len(self.channel_names), self.num_z, max_y, max_x)
         self.stitched_images = da.zeros(tczyx_shape, dtype=self.dtype, chunks=(1, 1, 1, max_y, max_x))
-
 
     def stitch_images(self, progress_callback=None):
         total_tiles = sum(len(z_data) for channel_data in self.organized_data.values() for z_data in channel_data.values())
         processed_tiles = 0
-        max_col = max(tile_info['col'] for channel_data in self.organized_data.values() for z_data in channel_data.values() for tile_info in z_data)
-        max_row = max(tile_info['row'] for channel_data in self.organized_data.values() for z_data in channel_data.values() for tile_info in z_data)
-
+        reverse_rows = False  # reverse rows (i)
         for channel_idx, channel in enumerate(self.channel_names):
             for z_level, z_data in self.organized_data[channel].items():
                 for tile_info in z_data:
                     tile = imread(os.path.join(self.image_folder, tile_info['filename']))[0] #.compute()
                     col, row = tile_info['col'], tile_info['row']
-                    x = col * self.input_width 
+                    x = col * self.input_width
                     y = row * self.input_height
+                    if reverse_rows:
+                        x = (self.num_cols - 1 - col) * self.input_width  # reversed
                     self.stitched_images[0, channel_idx, z_level, y:y+tile.shape[0], x:x+tile.shape[1]] = tile
                     processed_tiles += 1
                     if progress_callback is not None:
@@ -196,10 +186,7 @@ class Stitcher:
 
     def stitch_images_overlap(self, v_shift, h_shift, progress_callback=None):
         total_tiles = sum(len(z_data) for channel_data in self.organized_data.values() for z_data in channel_data.values())
-        processed_tiles = 0
-        max_col = max(tile_info['col'] for channel_data in self.organized_data.values() for z_data in channel_data.values() for tile_info in z_data)
-        max_row = max(tile_info['row'] for channel_data in self.organized_data.values() for z_data in channel_data.values() for tile_info in z_data)
-                    
+        processed_tiles = 0              
         for channel_idx, channel in enumerate(self.channel_names):
             for z_level, z_data in self.organized_data[channel].items():
                 for tile_info in z_data:
@@ -208,12 +195,12 @@ class Stitcher:
                     col = tile_info['col']
                     row = tile_info['row'] 
                     if h_shift[0] > 0:
-                        x = (self.input_width + h_shift[1]) * col - (max_row - row) * v_shift[1]
+                        x = (self.input_width + h_shift[1]) * col - (self.num_rows - 1 - row) * v_shift[1]
                     else:
                         x = (self.input_width + h_shift[1]) * col + row * v_shift[1]
 
                     if v_shift[1] > 0:
-                        y = (self.input_height + v_shift[0]) * row - (max_col - col) * h_shift[0]
+                        y = (self.input_height + v_shift[0]) * row - (self.num_cols - 1 - col) * h_shift[0]
                     else:
                         y = (self.input_height + v_shift[0]) * row + col * h_shift[0]
 
