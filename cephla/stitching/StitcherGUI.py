@@ -12,8 +12,10 @@ class StitchingThread(QThread):
     update_progress = pyqtSignal(int, int)
     finished = pyqtSignal()
     error_occurred = pyqtSignal(str)
+    warning = pyqtSignal(str)
     saving_started = pyqtSignal()
     saving_finished = pyqtSignal(str, object)
+
 
     def __init__(self, input_folder, output_name="output", output_format=".ome.zarr", use_registration=0, max_overlap=0, z_level=0, channel=""):
         super().__init__()
@@ -32,11 +34,13 @@ class StitchingThread(QThread):
             # get acquisition parameters
             configs_path = os.path.join(self.input_folder, 'configurations.xml')
             acquistion_params_path = os.path.join(self.input_folder, 'acquisition parameters.json')
-            self.stitcher.extract_selected_modes_from_xml(configs_path)
-            self.stitcher.extract_acquisition_parameters_from_json(acquistion_params_path)
+            try:
+                self.stitcher.extract_acquisition_parameters_from_json(acquistion_params_path)
+                #self.stitcher.extract_selected_modes_from_xml(configs_path)
+            except Exception as e:
+                self.warning.emit(str(e))
             # parse filenames in input directory
             self.stitcher.parse_filenames()
-
             if self.use_registration: 
                 # calculate shift from adjacent images and stitch with overlap
                 vertical_shift, horizontal_shift = self.stitcher.calculate_shifts(self.z_level, self.channel, self.max_overlap)
@@ -93,6 +97,7 @@ class StitchingGUI(QWidget):
         self.layout.addWidget(self.maxOverlapLabel)
         self.maxOverlapLabel.hide()  # Hide initially
 
+        # Label to show selected z-Level 
         self.zLevelInputLabel = QLabel('Select Z-Level for Registration: ', self)
         self.layout.addWidget(self.zLevelInputLabel)
         self.zLevelInputLabel.hide()
@@ -100,6 +105,7 @@ class StitchingGUI(QWidget):
         self.layout.addWidget(self.zLevelInput)
         self.zLevelInput.hide()
 
+        # Label to show selected channel
         self.channelDropdownLabel = QLabel(f'Select Channel for Registration: ', self)
         self.layout.addWidget(self.channelDropdownLabel)
         self.channelDropdownLabel.hide()
@@ -137,9 +143,10 @@ class StitchingGUI(QWidget):
         self.progressBar.hide()
 
         # Status label
-        self.statusLabel = QLabel('Status: Idle', self)
+        self.statusLabel = QLabel('Status: Enter Image Stitcher Inputs', self)
         self.layout.addWidget(self.statusLabel)
 
+        # Window title
         self.setWindowTitle('Image Stitcher')
         self.setGeometry(300, 300, 400, 200)
 
@@ -147,14 +154,17 @@ class StitchingGUI(QWidget):
         self.inputDirectory = QFileDialog.getExistingDirectory(self, "Select Input Image Folder")
         if self.inputDirectory: 
             self.inputDirectoryBtn.setText(f'Selected: {self.inputDirectory}')
-            self.statusLabel.setText('Status: Input images folder selected')
+            self.statusLabel.setText('Status: Input Images Folder Selected')
 
     def onRegistrationCheck(self, checked):
         if checked:
             if not self.inputDirectory:
-                QMessageBox.warning(self, "Input Error", "Please select an input image folder first")
+                QMessageBox.warning(self, "Input Error", "Please Select an Input Image Folder First")
                 return
-            max_overlap, ok = QInputDialog.getInt(self, "Max Overlap", "Enter Max Overlap (pixels):", 128, 0, 3000, 1)
+            stitcher = Stitcher(input_folder=self.inputDirectory)  # Temp instance to parse filenames
+            stitcher.parse_filenames()
+            max_max_overlap = min(stitcher.input_height, stitcher.input_width)
+            max_overlap, ok = QInputDialog.getInt(self, "Max Overlap", "Enter Max Overlap (pixels):", 128, 0, max_max_overlap, 1)
             if ok:
                 self.max_overlap = max_overlap
                 self.maxOverlapLabel.setText(f'Max Overlap Between Adjacent Images: {self.max_overlap} pixels')
@@ -162,20 +172,20 @@ class StitchingGUI(QWidget):
             else:
                 # User canceled the input dialog, uncheck the checkbox
                 self.useRegistrationCheck.setChecked(False)
-            stitcher = Stitcher(input_folder=self.inputDirectory)  # Temp instance to parse filenames
-            stitcher.parse_filenames()
 
+            # Create z-level input
             self.zLevelInputLabel.show()
-            self.zLevelInput.setMinimum(0)  # Minimum Z level
-            self.zLevelInput.setMaximum(stitcher.num_z - 1)  # Maximum Z level
+            self.zLevelInput.setMinimum(0)  # Minimum z level
+            self.zLevelInput.setMaximum(stitcher.num_z - 1)  # Maximum z level
             self.zLevelInput.show()
 
+            # Create channel dropdown
             self.channelDropdownLabel.show()
             self.channelDropdown.addItems(stitcher.channel_names)
             self.channelDropdown.show()
-            # Create Z Level input
 
         else:
+            # Reset user inputs for registration
             self.max_overlap = 0
             self.maxOverlapLabel.hide()
             self.zLevelInputLabel.hide()
@@ -203,23 +213,24 @@ class StitchingGUI(QWidget):
         self.channelDropdown.hide()
 
         if not self.inputDirectory or not output_name:
-            QMessageBox.warning(self, "Input Error", "Please select an input image folder and specify an output name.")
+            QMessageBox.warning(self, "Input Error", "Please Select an Input Image Folder and Specify an Output Name.")
             return
         if use_registration and (not self.max_overlap or self.max_overlap < 0):
-            QMessageBox.warning(self, "Input Error", "Please enter a valid max overlap value.")
+            QMessageBox.warning(self, "Input Error", "Please Enter a Valid Max Overlap Value.")
             return
 
         self.viewNapariBtn.setEnabled(False)
         self.progressBar.setValue(0)
         self.progressBar.show()
-        self.statusLabel.setText('Status: Starting stitching...')
+        self.statusLabel.setText('Status: Starting Stitching...')
 
         # Create and start the stitching thread
         self.thread = StitchingThread(self.inputDirectory, output_name, self.output_format, use_registration, self.max_overlap, selected_z_level, selected_channel)
         self.thread.update_progress.connect(self.updateProgressBar)
         self.thread.error_occurred.connect(self.showError)
+        self.thread.warning.connect(self.showWarning)
         self.thread.saving_started.connect(self.savingStarted)
-        self.thread.saving_finished.connect(self.viewNapari)
+        self.thread.saving_finished.connect(self.savingFinished)
         self.thread.finished.connect(self.stitchingFinished)
         self.thread.start()
 
@@ -228,8 +239,7 @@ class StitchingGUI(QWidget):
         self.progressBar.setValue(value)
 
     def stitchingFinished(self):
-        self.statusLabel.setText('Status: Done stitching!')
-        
+        self.statusLabel.setText('Status: Done Stitching!')
         # Reset the use registration checkbox
         self.useRegistrationCheck.setChecked(False)
         self.maxOverlapLabel.hide()
@@ -240,16 +250,19 @@ class StitchingGUI(QWidget):
 
     def showError(self, message):
         QMessageBox.critical(self, "Stitching Failed", message)
-        self.statusLabel.setText('Status: Error encountered')
+        self.statusLabel.setText('Status: Error Encountered!')
         self.progressBar.hide()
 
+    def showWarning(self, message):
+        QMessageBox.warning(self, "File Not Found Warning:", message)
+        self.statusLabel.setText('Status: File Not Found... Continuing Stitching...')
+
     def savingStarted(self):
-        self.statusLabel.setText('Status: Saving stitched image...')
+        self.statusLabel.setText('Status: Saving Stitched Image...')
         self.progressBar.setRange(0, 0)  # Set the progress bar to indeterminate mode.
 
-
-    def viewNapari(self, output_path, dtype):
-        self.statusLabel.setText('Status: Saving completed.')
+    def savingFinished(self, output_path, dtype):
+        self.statusLabel.setText('Status: Saving Completed.')
         self.adjustSize()
         self.progressBar.setRange(0, 100)
         self.progressBar.setValue(0)

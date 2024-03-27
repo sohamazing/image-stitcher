@@ -171,7 +171,7 @@ class Stitcher:
     def stitch_images(self, progress_callback=None):
         total_tiles = sum(len(z_data) for channel_data in self.organized_data.values() for z_data in channel_data.values())
         processed_tiles = 0
-        reverse_rows = False  # reverse rows (i)
+        reverse_rows = True  # reverse rows (i)
         for channel_idx, channel in enumerate(self.channel_names):
             for z_level, z_data in self.organized_data[channel].items():
                 for tile_info in z_data:
