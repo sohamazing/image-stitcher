@@ -276,7 +276,7 @@ class Stitcher:
                     left_crop -= h_crop_v_shift if col > 0 else 0
                     right_crop -= h_crop_v_shift if col < self.num_cols - 1 else 0
 
-                    print(top_crop, bottom_crop, left_crop, right_crop)
+                    #print(top_crop, bottom_crop, left_crop, right_crop)
                     top_crop, bottom_crop, left_crop, right_crop = max(0, top_crop), max(0, bottom_crop), max(0, left_crop), max(0, right_crop)
 
                     cropped_tile = tile[top_crop:tile.shape[0]-bottom_crop, left_crop:tile.shape[1]-right_crop]

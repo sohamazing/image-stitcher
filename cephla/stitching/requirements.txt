@@ -1,5 +1,4 @@
 PyQt5
-matplotlib
 dask_image
 aicsimageio
 napari[all]
