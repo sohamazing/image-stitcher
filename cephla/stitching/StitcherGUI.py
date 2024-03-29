@@ -1,10 +1,13 @@
 # StitcherGUI.py
 import sys
 import os
+from matplotlib import pyplot as plt
+import gc
 from PyQt5.QtWidgets import (QApplication, QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QFileDialog, QLineEdit, QLabel, QProgressBar, QMessageBox, QCheckBox, QInputDialog, QComboBox, QSpinBox)
-from PyQt5.QtCore import QThread, pyqtSignal
+from PyQt5.QtCore import QThread, pyqtSignal, Qt
 import numpy as np
 import napari
+import psutil
 
 from Stitcher import Stitcher
 
@@ -13,37 +16,44 @@ class StitchingThread(QThread):
     finished = pyqtSignal()
     error_occurred = pyqtSignal(str)
     warning = pyqtSignal(str)
+    getting_flatfields = pyqtSignal()
+    start_stitching = pyqtSignal()
     saving_started = pyqtSignal()
     saving_finished = pyqtSignal(str, object)
 
 
-    def __init__(self, input_folder, output_name="output", output_format=".ome.zarr", use_registration=0, max_overlap=0, z_level=0, channel=""):
+    def __init__(self, input_folder, output_name="output", output_format=".ome.zarr", apply_flatfield=0, use_registration=0, z_level=0, channel="", v_max_overlap=0, h_max_overlap=0):
         super().__init__()
         # Initialize Stitcher with the required attributes
         self.input_folder = input_folder
         self.output_format = output_format
-        self.stitcher = Stitcher(input_folder=input_folder, output_name=output_name+output_format)
+        self.stitcher = Stitcher(input_folder=input_folder, output_name=output_name+output_format, apply_flatfield=apply_flatfield)
         self.output_path = self.stitcher.output_path
         self.use_registration = use_registration
         self.z_level = z_level
         self.channel = channel
-        self.max_overlap = max_overlap
+        self.v_max_overlap = v_max_overlap
+        self.h_max_overlap = h_max_overlap
 
     def run(self):
-        try:
-            # get acquisition parameters
-            configs_path = os.path.join(self.input_folder, 'configurations.xml')
-            acquistion_params_path = os.path.join(self.input_folder, 'acquisition parameters.json')
+        try: 
+            self.stitcher.parse_filenames()
             try:
-                self.stitcher.extract_acquisition_parameters_from_json(acquistion_params_path)
-                #self.stitcher.extract_selected_modes_from_xml(configs_path)
+                self.stitcher.extract_acquisition_parameters_from_json()
+                self.stitcher.extract_selected_modes_from_xml()
+                self.stitcher.determine_directions()
             except Exception as e:
                 self.warning.emit(str(e))
-            # parse filenames in input directory
-            self.stitcher.parse_filenames()
+
+            if self.stitcher.apply_flatfield:
+                self.getting_flatfields.emit()
+                self.stitcher.get_flatfields(progress_callback=self.update_progress.emit)
+
+            self.start_stitching.emit()
+
             if self.use_registration: 
                 # calculate shift from adjacent images and stitch with overlap
-                vertical_shift, horizontal_shift = self.stitcher.calculate_shifts(self.z_level, self.channel, self.max_overlap)
+                vertical_shift, horizontal_shift = self.stitcher.calculate_shifts(self.z_level, self.channel, self.v_max_overlap, self.h_max_overlap)
                 self.stitcher.pre_allocate_canvas(vertical_shift, horizontal_shift)
                 self.stitcher.stitch_images_overlap(vertical_shift, horizontal_shift, progress_callback=self.update_progress.emit)
             else: 
@@ -51,12 +61,9 @@ class StitchingThread(QThread):
                 self.stitcher.pre_allocate_grid()
                 self.stitcher.stitch_images(progress_callback=self.update_progress.emit)
 
-            self.saving_started.emit()
-            # use acquisition parameters if available
             dz_um = self.stitcher.acquisition_params.get("dz(um)", None)
             sensor_pixel_size_um = self.stitcher.acquisition_params.get("sensor_pixel_size_um", None)
-
-            # save output with ome metadata
+            self.saving_started.emit()
             if self.output_format == ".ome.tiff":
                 self.stitcher.save_as_ome_tiff(dz_um=dz_um, sensor_pixel_size_um=sensor_pixel_size_um)
             elif self.output_format == ".ome.zarr":
@@ -66,6 +73,8 @@ class StitchingThread(QThread):
         except Exception as e:
             self.error_occurred.emit(str(e))
         finally:
+            self.stitcher.stitched_images = None
+            self.stitcher.flatfields = {}
             self.finished.emit()
 
 class StitchingGUI(QWidget):
@@ -75,17 +84,16 @@ class StitchingGUI(QWidget):
         self.output_path = ""
         self.output_format = ""
         self.dtype = None
-        self.max_overlap = 0
+        self.v_max_overlap = self.h_max_overlap = 0
 
     def initUI(self):
         self.layout = QVBoxLayout(self)
         
         # Input folder selection
         self.inputDirectoryBtn = QPushButton('Select Input Images Dataset Directory', self)
-        self.inputDirectoryBtn.clicked.connect(self.selectInputDirectory)
         self.inputDirectory = None
+        self.inputDirectoryBtn.clicked.connect(self.selectInputDirectory)
         self.layout.addWidget(self.inputDirectoryBtn)
-
 
         # Checkbox for registering images when stitching
         self.useRegistrationCheck = QCheckBox('Align Image Edges When Stitching', self)
@@ -93,9 +101,13 @@ class StitchingGUI(QWidget):
         self.layout.addWidget(self.useRegistrationCheck)
         
         # Label to show selected max overlap after input dialog
-        self.maxOverlapLabel = QLabel('Select Max Overlap Between Adjacent Images: ', self)
-        self.layout.addWidget(self.maxOverlapLabel)
-        self.maxOverlapLabel.hide()  # Hide initially
+        self.maxHorizontalOverlapLabel = QLabel('Select Max Overlap Between Horizontally Adjacent Images: ', self)
+        self.layout.addWidget(self.maxHorizontalOverlapLabel)
+        self.maxHorizontalOverlapLabel.hide()  # Hide initially
+
+        self.maxVerticalOverlapLabel = QLabel('Select Max Overlap Between Vertically Adjacent Images: ', self)
+        self.layout.addWidget(self.maxVerticalOverlapLabel)
+        self.maxVerticalOverlapLabel.hide()  # Hide initially
 
         # Label to show selected z-Level 
         self.zLevelInputLabel = QLabel('Select Z-Level for Registration: ', self)
@@ -113,6 +125,10 @@ class StitchingGUI(QWidget):
         self.layout.addWidget(self.channelDropdown)
         self.channelDropdown.hide()
 
+        # Chekbox for applying flatfield correction
+        self.applyFlatfieldCorrectionCheck = QCheckBox("Apply Flatfield Correction", self)
+        self.layout.addWidget(self.applyFlatfieldCorrectionCheck)
+
         # Output format selection
         self.outputFormatLabel = QLabel('Select Output Format:', self)
         self.layout.addWidget(self.outputFormatLabel)
@@ -129,7 +145,7 @@ class StitchingGUI(QWidget):
 
         # Start button
         self.startBtn = QPushButton('Start Stitching', self)
-        self.startBtn.clicked.connect(self.startStitching)
+        self.startBtn.clicked.connect(self.startProcess)
         self.layout.addWidget(self.startBtn)
 
         # View napari button
@@ -151,10 +167,13 @@ class StitchingGUI(QWidget):
         self.setGeometry(300, 300, 400, 200)
 
     def selectInputDirectory(self):
+        prevInput = self.inputDirectory
         self.inputDirectory = QFileDialog.getExistingDirectory(self, "Select Input Image Folder")
         if self.inputDirectory: 
             self.inputDirectoryBtn.setText(f'Selected: {self.inputDirectory}')
             self.statusLabel.setText('Status: Input Images Folder Selected')
+            if self.useRegistrationCheck.isChecked() and self.inputDirectory != prevInput:
+                self.useRegistrationCheck.setChecked(False)
 
     def onRegistrationCheck(self, checked):
         if checked:
@@ -164,12 +183,19 @@ class StitchingGUI(QWidget):
                 return
             stitcher = Stitcher(input_folder=self.inputDirectory)  # Temp instance to parse filenames
             stitcher.parse_filenames()
-            max_max_overlap = min(stitcher.input_height, stitcher.input_width)
-            max_overlap, ok = QInputDialog.getInt(self, "Max Overlap", "Enter Max Overlap (pixels):", 128, 0, max_max_overlap, 1)
-            if ok:
-                self.max_overlap = max_overlap
-                self.maxOverlapLabel.setText(f'Max Overlap Between Adjacent Images: {self.max_overlap} pixels')
-                self.maxOverlapLabel.show()
+            h_max_overlap, h_ok = QInputDialog.getInt(self, "Max Horizontal Overlap",
+                                "Enter Max Overlap for Horizontally Adjacent Tiles (pixels):",
+                                128, 0, stitcher.input_width, 1)
+            if h_ok:
+                v_max_overlap, v_ok = QInputDialog.getInt(self, "Max Vertical Overlap", 
+                                "Enter Max Overlap for Vertically Adjacent Tiles (pixels):", 
+                                h_max_overlap, 0, stitcher.input_height, 1)
+            if h_ok and v_ok:
+                self.v_max_overlap, self.h_max_overlap = v_max_overlap, h_max_overlap
+                self.maxHorizontalOverlapLabel.setText(f'Max Overlap for Horizontally Adjacent Images: {self.h_max_overlap} pixels')
+                self.maxHorizontalOverlapLabel.show()
+                self.maxVerticalOverlapLabel.setText(f'Max Overlap for Vertically Adjacent Images: {self.v_max_overlap} pixels')
+                self.maxVerticalOverlapLabel.show()
             else:
                 # User canceled the input dialog, uncheck the checkbox
                 self.useRegistrationCheck.setChecked(False)
@@ -185,13 +211,15 @@ class StitchingGUI(QWidget):
             # Create channel dropdown
             self.channelDropdownLabel.setText('Select Channel for Registration:')
             self.channelDropdownLabel.show()
+            self.channelDropdown.clear()
             self.channelDropdown.addItems(stitcher.channel_names)
             self.channelDropdown.show()
 
         else:
             # Reset user inputs for registration
-            self.max_overlap = 0
-            self.maxOverlapLabel.hide()
+            self.v_max_overlap = self.h_max_overlap = 0
+            self.maxHorizontalOverlapLabel.hide()
+            self.maxVerticalOverlapLabel.hide()
             self.zLevelInputLabel.hide()
             self.zLevelInput.hide()
             self.channelDropdownLabel.hide()
@@ -199,69 +227,101 @@ class StitchingGUI(QWidget):
             self.channelDropdown.hide()
             self.adjustSize()
 
-    def startStitching(self):
+    def startProcess(self):
+        gc.collect()
         output_name = self.outputNameEdit.text().strip()
+        if not self.inputDirectory or not output_name:
+            QMessageBox.warning(self, "Input Error", "Please Select an Input Image Folder and Specify an Output Name.")
+            return
         if self.outputFormatCombo.currentText() == "OME-TIFF":
             self.output_format = ".ome.tiff"
         elif self.outputFormatCombo.currentText() == "OME-ZARR":
             self.output_format = ".ome.zarr"
+
+        temp_stitcher = Stitcher(self.inputDirectory, output_name)
+        temp_stitcher.parse_filenames()  # Make sure this is necessary for the memory estimate
+        estimated_memory = temp_stitcher.estimate_memory_usage()
+        available_memory = psutil.virtual_memory().available
+
+        # if estimated_memory > available_memory:
+        #     msgBox = QMessageBox()
+        #     msgBox.setIcon(QMessageBox.Warning)
+        #     msgBox.setWindowTitle("Memory Warning")
+        #     msgBox.setText("Insufficient memory for stitching operation.")
+        #     msgBox.setInformativeText(f"Required: {estimated_memory} B\n"
+        #                               f"Available: {available_memory} B\n")
+        #     # Create a QLabel for the "Proceed anyway?" text and set alignment and styling if necessary
+        #     proceed_label = QLabel("Proceed anyway?")
+        #     proceed_label.setAlignment(Qt.AlignCenter)
+        #     layout = msgBox.layout()
+        #     layout.addWidget(proceed_label, 2, 0, 1, layout.columnCount(), Qt.AlignLeft)
+
+        #     msgBox.addButton(QMessageBox.Yes)
+        #     msgBox.addButton(QMessageBox.No)
+        #     msgBox.setDefaultButton(QMessageBox.No)
+        #     response = msgBox.exec()
+
+        if estimated_memory > available_memory:
+            msgBox = QMessageBox()
+            msgBox.setIcon(QMessageBox.Warning)
+            msgBox.setWindowTitle("Memory Warning")
+            msgBox.setText("Proceed with Insufficient Memory for Image Stitching?")
+            msgBox.setInformativeText(f"Required: {estimated_memory} B\n"
+                                      f"Available: {available_memory} B\n")
+            msgBox.addButton(QMessageBox.No)
+            msgBox.addButton(QMessageBox.Yes)
+            msgBox.setDefaultButton(QMessageBox.No)
+            response = msgBox.exec()
+
+            if response == QMessageBox.No:
+                # Reset GUI or handle the abort operation
+                #self.resetInputs()
+                return  # Stop the process
         
+        apply_flatfield = self.applyFlatfieldCorrectionCheck.isChecked()
         use_registration = self.useRegistrationCheck.isChecked()
+        self.applyFlatfieldCorrectionCheck.setEnabled(False)
         self.useRegistrationCheck.setEnabled(False)
+        if use_registration and (self.v_max_overlap < 0 or self.h_max_overlap < 0):
+            QMessageBox.warning(self, "Input Error", "Please Enter Valid Max Overlap Values.")
+            return
 
         selected_z_level = self.zLevelInput.value() if self.zLevelInput else 0
-        self.zLevelInputLabel.setText(f'Selected Z-Level for Registration: {selected_z_level}')
-        self.zLevelInput.hide()
-        
         selected_channel = self.channelDropdown.currentText() if self.channelDropdown else ""
-        self.channelDropdownLabel.setText(f'Selected Channel for Registration: {selected_channel}')
+        self.zLevelInput.hide()
         self.channelDropdown.hide()
-
-        if not self.inputDirectory or not output_name:
-            QMessageBox.warning(self, "Input Error", "Please Select an Input Image Folder and Specify an Output Name.")
-            return
-        if use_registration and (not self.max_overlap or self.max_overlap < 0):
-            QMessageBox.warning(self, "Input Error", "Please Enter a Valid Max Overlap Value.")
-            return
+        self.zLevelInputLabel.setText(f'Selected Z-Level for Registration: {selected_z_level}')
+        self.channelDropdownLabel.setText(f'Selected Channel for Registration: {selected_channel}')
 
         self.viewNapariBtn.setEnabled(False)
+        try:
+            self.viewNapariBtn.clicked.disconnect()
+        except TypeError:  # If no connections exist, disconnect will raise a TypeError
+            pass
         self.progressBar.setValue(0)
         self.progressBar.show()
-        self.statusLabel.setText('Status: Starting Stitching...')
+        self.statusLabel.setText('Status: Starting...')
 
         # Create and start the stitching thread
-        self.thread = StitchingThread(self.inputDirectory, output_name, self.output_format, use_registration, self.max_overlap, selected_z_level, selected_channel)
+        self.thread = StitchingThread(self.inputDirectory, output_name, self.output_format, apply_flatfield, use_registration, selected_z_level, selected_channel, self.v_max_overlap, self.h_max_overlap)
         self.thread.update_progress.connect(self.updateProgressBar)
         self.thread.error_occurred.connect(self.showError)
         self.thread.warning.connect(self.showWarning)
+        self.thread.getting_flatfields.connect(self.flatfieldStarted)
+        self.thread.start_stitching.connect(self.startStitching)
         self.thread.saving_started.connect(self.savingStarted)
         self.thread.saving_finished.connect(self.savingFinished)
         self.thread.finished.connect(self.stitchingFinished)
         self.thread.start()
 
-    def updateProgressBar(self, value, total):
-        self.progressBar.setMaximum(total)
-        self.progressBar.setValue(value)
-
-    def stitchingFinished(self):
-        self.statusLabel.setText('Status: Done Stitching!')
-        # Reset the use registration checkbox
-        self.useRegistrationCheck.setEnabled(True)
-        self.useRegistrationCheck.setChecked(False)
-        self.maxOverlapLabel.hide()
-        self.maxOverlap = None
-        
-        # You could also reset the progress bar here if you want
+    def flatfieldStarted(self):
+        self.statusLabel.setText('Status: Calculating Flatfield Images...')
         self.progressBar.setValue(0)
 
-    def showError(self, message):
-        QMessageBox.critical(self, "Stitching Failed", message)
-        self.statusLabel.setText('Status: Error Encountered!')
-        self.progressBar.hide()
-
-    def showWarning(self, message):
-        QMessageBox.warning(self, "File Not Found Warning:", message)
-        self.statusLabel.setText('Status: File Not Found... Continuing Stitching...')
+    def startStitching(self):
+        self.progressBar.setValue(0)
+        self.progressBar.show()
+        self.statusLabel.setText('Status: Stitching Input Images...')
 
     def savingStarted(self):
         self.statusLabel.setText('Status: Saving Stitched Image...')
@@ -269,20 +329,30 @@ class StitchingGUI(QWidget):
 
     def savingFinished(self, output_path, dtype):
         self.statusLabel.setText('Status: Saving Completed.')
-        self.adjustSize()
-        self.progressBar.setRange(0, 100)
-        self.progressBar.setValue(0)
-        self.progressBar.hide()
         self.output_path = output_path
         self.dtype = dtype
         self.viewNapariBtn.setEnabled(True)
         self.contrast_limits = self.determineContrastLimits(dtype)
-
         try:
             self.viewNapariBtn.clicked.disconnect()
         except TypeError:  # If no connections exist, disconnect will raise a TypeError
             pass
         self.viewNapariBtn.clicked.connect(self.openNapari)
+
+    def stitchingFinished(self):
+        self.statusLabel.setText('Status: Done Stitching  ...' + os.path.join(*(self.output_path.split('/')[-3:])))
+        # Reset the use registration checkbox
+        self.useRegistrationCheck.setEnabled(True)
+        self.useRegistrationCheck.setChecked(False)
+        self.applyFlatfieldCorrectionCheck.setEnabled(True)
+        self.applyFlatfieldCorrectionCheck.setChecked(False)
+        self.maxHorizontalOverlapLabel.hide()
+        self.maxVerticalOverlapLabel.hide()
+        self.maxOverlap = None
+        self.progressBar.hide()
+        self.progressBar.setValue(0)
+        self.progressBar.setRange(0, 100)
+        self.adjustSize()
 
     def openNapari(self):
         try:
@@ -291,12 +361,13 @@ class StitchingGUI(QWidget):
                 viewer.open(self.output_path, plugin='napari-ome-zarr', contrast_limits=self.contrast_limits)
             else:
                 viewer.open(self.output_path, contrast_limits=self.contrast_limits)
-            '''
-            # Apply contrast limits if defined
-             if contrast_limits is not None:
-                for layer in viewer.layers:
-                    layer.contrast_limits = contrast_limits\
-            '''
+            # Set contrast limits and colormap for each layer.
+
+            colormap = 'inferno'  # 'blue', 'gray', 'magma', 'viridis', etc.
+            for layer in viewer.layers:
+                layer.colormap = colormap
+                #layer.contrast_limits = self.contrast_limits
+
             # Start the Napari event loop
             # napari.run()
         except Exception as e:
@@ -308,7 +379,20 @@ class StitchingGUI(QWidget):
         elif dtype == np.uint8:
             return [0, 255]
         return None
-                   
+
+    def updateProgressBar(self, value, total):
+        self.progressBar.setMaximum(total)
+        self.progressBar.setValue(value)
+
+    def showError(self, message):
+        QMessageBox.critical(self, "Stitching Failed", message)
+        self.statusLabel.setText('Status: Error Encountered!')
+        self.progressBar.hide()
+
+    def showWarning(self, message):
+        warning = f"""Missing Acquisition Parameters, Configurations, or Coordinates: \n{message}
+        \nContinuing Stitching..."""
+        QMessageBox.warning(self, "File Not Found", warning)
         
 def main():
     app = QApplication(sys.argv)

@@ -1,0 +1,9 @@
+PyQt5
+matplotlib
+dask_image
+aicsimageio
+napari[all]
+napari-ome-zarr
+jax[cuda12_pip]==0.4.23; platform_system == "Linux" --find-links https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
+jax[cpu]==0.4.23; platform_system == "Darwin"
+basicpy
