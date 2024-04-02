@@ -52,13 +52,13 @@ class StitchingThread(QThread):
                 self.getting_flatfields.emit()
                 self.stitcher.get_flatfields(progress_callback=self.update_progress.emit)
 
-            # stitch images onto allocated dask array
+            # calculate translations to align images
             self.start_stitching.emit()
             if self.use_registration: 
-                vertical_shift, horizontal_shift = self.stitcher.calculate_shifts(self.registration_z_level, self.registration_channel, self.v_max_overlap, self.h_max_overlap)
-                self.stitcher.stitch_images_cropped(vertical_shift, horizontal_shift, progress_callback=self.update_progress.emit)
-            else:
-                self.stitcher.stitch_images(progress_callback=self.update_progress.emit)
+                self.stitcher.calculate_shifts(self.registration_z_level, self.registration_channel, self.v_max_overlap, self.h_max_overlap)
+
+            # stitch images onto allocated dask array
+            self.stitcher.stitch_images_cropped(progress_callback=self.update_progress.emit)
 
             # save images in selected output format with correct ome metadata
             dz_um = self.stitcher.acquisition_params.get("dz(um)", None)
@@ -233,8 +233,8 @@ class StitchingGUI(QWidget):
             temp_stitcher.determine_directions()
         except: 
             pass
-        v_shift, h_shift = temp_stitcher.calculate_shifts(v_max_overlap=self.v_max_overlap, h_max_overlap=self.h_max_overlap)
-        _, estimated_memory = temp_stitcher.get_tczyx_shape(v_shift, h_shift)
+        temp_stitcher.calculate_shifts(v_max_overlap=self.v_max_overlap, h_max_overlap=self.h_max_overlap)
+        _, estimated_memory = temp_stitcher.get_tczyx_shape()
         available_memory = psutil.virtual_memory().available
 
         if estimated_memory > available_memory:
@@ -334,7 +334,7 @@ class StitchingGUI(QWidget):
         self.viewNapariBtn.clicked.connect(self.openNapari)
 
     def stitchingFinished(self):
-        self.statusLabel.setText('Status: Done Stitching  ...' + os.path.join(*(self.output_path.split('/')[-3:])))
+        self.statusLabel.setText('Status: Done Stitching  .../' + os.path.join(*(self.output_path.split('/')[-3:])))
         # Reset the user inputs 
         self.useRegistrationCheck.setEnabled(True)
         self.useRegistrationCheck.setChecked(False)
