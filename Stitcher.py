@@ -75,7 +75,6 @@ class Stitcher:
         sorted_input_files = sorted([filename for filename in os.listdir(self.image_folder) 
                              if filename.endswith(".bmp") or filename.endswith(".tiff")])
 
-        print(sorted_input_files)
         for filename in sorted_input_files:
             if filename.endswith(".bmp") or filename.endswith("Ex.tiff"):
                 four_input_format = True
@@ -116,10 +115,10 @@ class Stitcher:
 
 
     def get_flatfields(self, progress_callback=None):
-        print("getting flatfields...")
+        #print("getting flatfields...")
         for c_i, channel in enumerate(self.channel_names):
             channel_tiles = []
-            print("channel:", channel)
+            #print("channel:", channel)
             # Create a shuffled list of all tile for each channel
             for z_level, z_data in self.stitching_data[channel].items():
                 channel_tiles.extend(z_data)
@@ -127,7 +126,7 @@ class Stitcher:
 
             images = []
             for tile_info in channel_tiles[:min(32, len(channel_tiles))]:
-                print("row:", tile_info['row'], "col:", tile_info['col'], "z_level:", tile_info['z_level'])
+                #print("row:", tile_info['row'], "col:", tile_info['col'], "z_level:", tile_info['z_level'])
                 filepath = os.path.join(self.image_folder, tile_info['filename'])
                 images.append(imread(filepath)[0])
 
@@ -138,7 +137,6 @@ class Stitcher:
             #np.save(os.path.join(self.input_folder, f'{channel}_flatfield.npy'), basic.flatfield)
             self.flatfields[channel] = basic.flatfield
             progress_callback(c_i + 1, self.num_c)
-            print("got flatfields", c_i + 1)
 
     def calculate_horizontal_shift(self, img1_path, img2_path, max_overlap):
         img1 = imread(img1_path)[0]
@@ -222,7 +220,8 @@ class Stitcher:
         z_level = tile_info['z_level']
         channel = tile_info['channel']
         if self.apply_flatfield:
-            tile = tile / self.flatfields[channel]
+            tile = (tile / self.flatfields[channel]).clip(min=np.iinfo(self.dtype).min, 
+                                                          max=np.iinfo(self.dtype).max).astype(self.dtype)
 
         # Get tile grid location (row, col)
         row = self.num_rows - 1 - tile_info['row'] if self.is_reversed['rows'] else tile_info['row']
@@ -253,7 +252,7 @@ class Stitcher:
             x += row * self.v_shift[1]  # Moves right if positive
         
         # Place cropped tile on the stitched image canvas
-        self.stitched_images[0, self.channel_names.index(channel), z_level, y:y+tile.shape[-2], x:x+tile.shape[-1]] = tile.astype(self.dtype)
+        self.stitched_images[0, self.channel_names.index(channel), z_level, y:y+tile.shape[-2], x:x+tile.shape[-1]] = tile
         # print(f" col:{col}, \trow:{row},\ty:{y}-{y+tile.shape[0]}, \tx:{x}-{x+tile.shape[-1]}")
 
 
@@ -273,10 +272,6 @@ class Stitcher:
             dimension_order=["TCZYX"]
         )
         self.stitched_images = None
-        # reference = pyvips.Image.new_from_file(self.output_path, access='random')
-        # print("reference pyvips dims: ", reference.shape)
-        # print("image metadata: ", reference.get('image-description'))
-        # print(reference.get_fields())
 
     def save_as_ome_zarr(self, dz_um=None, sensor_pixel_size_um=None):
         #print(self.stitched_images.shape)
