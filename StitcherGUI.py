@@ -21,7 +21,7 @@ class StitchingThread(QThread):
     saving_finished = pyqtSignal(str, object)
 
 
-    def __init__(self, input_folder, output_name="output", output_format=".ome.zarr", apply_flatfield=0, use_registration=0, z_level=0, channel="", v_max_overlap=0, h_max_overlap=0):
+    def __init__(self, input_folder, output_name="output", output_format=".ome.zarr", apply_flatfield=0, use_registration=0, z_level=0, channel=""): #, v_max_overlap=0, h_max_overlap=0):
         super().__init__()
         # Initialize Stitcher with the required attributes
         self.input_folder = input_folder
@@ -31,8 +31,8 @@ class StitchingThread(QThread):
         self.use_registration = use_registration
         self.registration_z_level = z_level
         self.registration_channel = channel
-        self.v_max_overlap = v_max_overlap
-        self.h_max_overlap = h_max_overlap
+        # self.v_max_overlap = v_max_overlap
+        # self.h_max_overlap = h_max_overlap
 
     def run(self):
         try:
@@ -55,7 +55,7 @@ class StitchingThread(QThread):
             # calculate translations to align images
             self.start_stitching.emit()
             if self.use_registration: 
-                self.stitcher.calculate_shifts(self.registration_z_level, self.registration_channel, self.v_max_overlap, self.h_max_overlap)
+                self.stitcher.calculate_shifts(self.registration_z_level, self.registration_channel) #, self.v_max_overlap, self.h_max_overlap)
 
             # stitch images onto allocated dask array
             self.stitcher.stitch_images_cropped(progress_callback=self.update_progress.emit)
@@ -84,7 +84,7 @@ class StitchingGUI(QWidget):
         self.output_path = ""
         self.output_format = ""
         self.dtype = None
-        self.v_max_overlap = self.h_max_overlap = 0
+        # self.v_max_overlap = self.h_max_overlap = 0
 
     def initUI(self):
         self.layout = QVBoxLayout(self)
@@ -100,13 +100,13 @@ class StitchingGUI(QWidget):
         self.useRegistrationCheck.toggled.connect(self.onRegistrationCheck)
         self.layout.addWidget(self.useRegistrationCheck)
         
-        # Label to show selected max overlap after input dialog
-        self.maxHorizontalOverlapLabel = QLabel('Select Max Overlap Between Horizontally Adjacent Images: ', self)
-        self.layout.addWidget(self.maxHorizontalOverlapLabel)
-        self.maxHorizontalOverlapLabel.hide()  # Hide initially
-        self.maxVerticalOverlapLabel = QLabel('Select Max Overlap Between Vertically Adjacent Images: ', self)
-        self.layout.addWidget(self.maxVerticalOverlapLabel)
-        self.maxVerticalOverlapLabel.hide()  # Hide initially
+        # # Label to show selected max overlap after input dialog
+        # self.maxHorizontalOverlapLabel = QLabel('Select Max Overlap Between Horizontally Adjacent Images: ', self)
+        # self.layout.addWidget(self.maxHorizontalOverlapLabel)
+        # self.maxHorizontalOverlapLabel.hide()  # Hide initially
+        # self.maxVerticalOverlapLabel = QLabel('Select Max Overlap Between Vertically Adjacent Images: ', self)
+        # self.layout.addWidget(self.maxVerticalOverlapLabel)
+        # self.maxVerticalOverlapLabel.hide()  # Hide initially
 
         # Label to show selected z-Level 
         self.zLevelInputLabel = QLabel('Select Z-Level for Registration: ', self)
@@ -182,23 +182,23 @@ class StitchingGUI(QWidget):
                 return
             stitcher = Stitcher(input_folder=self.inputDirectory)  # Temp instance to parse filenames
             stitcher.parse_filenames()
-            h_max_overlap, h_ok = QInputDialog.getInt(self, "Max Horizontal Overlap",
-                                "Enter Max Overlap for Horizontally Adjacent Tiles (pixels):",
-                                128, 0, stitcher.input_width, 1)
-            if h_ok:
-                v_max_overlap, v_ok = QInputDialog.getInt(self, "Max Vertical Overlap", 
-                                "Enter Max Overlap for Vertically Adjacent Tiles (pixels):", 
-                                h_max_overlap, 0, stitcher.input_height, 1)
-            if h_ok and v_ok:
-                self.v_max_overlap, self.h_max_overlap = v_max_overlap, h_max_overlap
-                self.maxHorizontalOverlapLabel.setText(f'Max Overlap for Horizontally Adjacent Images: {self.h_max_overlap} pixels')
-                self.maxHorizontalOverlapLabel.show()
-                self.maxVerticalOverlapLabel.setText(f'Max Overlap for Vertically Adjacent Images: {self.v_max_overlap} pixels')
-                self.maxVerticalOverlapLabel.show()
-            else:
-                # User canceled the input dialog, uncheck the checkbox
-                self.useRegistrationCheck.setChecked(False)
-                return
+            # h_max_overlap, h_ok = QInputDialog.getInt(self, "Max Horizontal Overlap",
+            #                     "Enter Max Overlap for Horizontally Adjacent Tiles (pixels):",
+            #                     128, 0, stitcher.input_width, 1)
+            # if h_ok:
+            #     v_max_overlap, v_ok = QInputDialog.getInt(self, "Max Vertical Overlap", 
+            #                     "Enter Max Overlap for Vertically Adjacent Tiles (pixels):", 
+            #                     h_max_overlap, 0, stitcher.input_height, 1)
+            # if h_ok and v_ok:
+            #     self.v_max_overlap, self.h_max_overlap = v_max_overlap, h_max_overlap
+            #     self.maxHorizontalOverlapLabel.setText(f'Max Overlap for Horizontally Adjacent Images: {self.h_max_overlap} pixels')
+            #     self.maxHorizontalOverlapLabel.show()
+            #     self.maxVerticalOverlapLabel.setText(f'Max Overlap for Vertically Adjacent Images: {self.v_max_overlap} pixels')
+            #     self.maxVerticalOverlapLabel.show()
+            # else:
+            #     # User canceled the input dialog, uncheck the checkbox
+            #     self.useRegistrationCheck.setChecked(False)
+            #     return
 
             # Create z-level input
             self.zLevelInputLabel.setText('Select Z-Level for Registration:')
@@ -216,9 +216,9 @@ class StitchingGUI(QWidget):
 
         else:
             # Reset user inputs for registration
-            self.v_max_overlap = self.h_max_overlap = 0
-            self.maxHorizontalOverlapLabel.hide()
-            self.maxVerticalOverlapLabel.hide()
+            # self.v_max_overlap = self.h_max_overlap = 0
+            # self.maxHorizontalOverlapLabel.hide()
+            # self.maxVerticalOverlapLabel.hide()
             self.zLevelInputLabel.hide()
             self.zLevelInput.hide()
             self.channelDropdownLabel.hide()
@@ -233,7 +233,7 @@ class StitchingGUI(QWidget):
             temp_stitcher.determine_directions()
         except: 
             pass
-        temp_stitcher.calculate_shifts(v_max_overlap=self.v_max_overlap, h_max_overlap=self.h_max_overlap)
+        temp_stitcher.calculate_shifts() #v_max_overlap=self.v_max_overlap, h_max_overlap=self.h_max_overlap)
         _, estimated_memory = temp_stitcher.get_tczyx_shape()
         available_memory = psutil.virtual_memory().available
 
@@ -265,8 +265,8 @@ class StitchingGUI(QWidget):
             self.output_format = ".ome.zarr"
 
         # Check if enough memory available
-        if not self.checkMemoryOk():
-            return
+        # if not self.checkMemoryOk():
+        #     return
         
         # Retrieve registration inputs
         apply_flatfield = self.applyFlatfieldCorrectionCheck.isChecked()
@@ -294,7 +294,7 @@ class StitchingGUI(QWidget):
         self.statusLabel.setText('Status: Starting...')
 
         # Create and start the stitching thread
-        self.thread = StitchingThread(self.inputDirectory, output_name, self.output_format, apply_flatfield, use_registration, selected_z_level, selected_channel, self.v_max_overlap, self.h_max_overlap)
+        self.thread = StitchingThread(self.inputDirectory, output_name, self.output_format, apply_flatfield, use_registration, selected_z_level, selected_channel) #, self.v_max_overlap, self.h_max_overlap)
         self.thread.update_progress.connect(self.updateProgressBar)
         self.thread.error_occurred.connect(self.showError)
         self.thread.warning.connect(self.showWarning)
@@ -340,9 +340,9 @@ class StitchingGUI(QWidget):
         self.useRegistrationCheck.setChecked(False)
         self.applyFlatfieldCorrectionCheck.setEnabled(True)
         self.applyFlatfieldCorrectionCheck.setChecked(False)
-        self.maxHorizontalOverlapLabel.hide()
-        self.maxVerticalOverlapLabel.hide()
-        self.maxOverlap = None
+        # self.maxHorizontalOverlapLabel.hide()
+        # self.maxVerticalOverlapLabel.hide()
+        # self.maxOverlap = None
         self.progressBar.hide()
         self.progressBar.setValue(0)
         self.progressBar.setRange(0, 100)

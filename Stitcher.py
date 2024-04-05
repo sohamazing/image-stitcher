@@ -135,7 +135,7 @@ class Stitcher:
             basic = BaSiC(get_darkfield=False, smoothness_flatfield=1)
             basic.fit(images)
             #np.save(os.path.join(self.input_folder, f'{channel}_flatfield.npy'), basic.flatfield)
-            self.flatfields[channel] = basic.flatfield
+            self.flatfields[c_i] = basic.flatfield
             progress_callback(c_i + 1, self.num_c)
 
     def calculate_horizontal_shift(self, img1_path, img2_path, max_overlap):
@@ -156,12 +156,39 @@ class Stitcher:
         shift, _, diffphase = registration.phase_cross_correlation(img1_roi, img2_roi, upsample_factor=10)
         return round(shift[0] - img1_roi.shape[0]), round(shift[1])
 
-    def calculate_shifts(self, z_level=0, channel="", v_max_overlap=0, h_max_overlap=0):
+    def calculate_shifts(self, z_level=0, channel=""):
         channel = self.channel_names[0] if channel not in self.channel_names else channel
-        # print("registration z_level:", z_level, " channel:", channel)
+        dx_mm = self.acquisition_params['dx(mm)']  # physical distance between adjacent scans in x direction
+        dy_mm = self.acquisition_params['dy(mm)']  # physical distance between adjacent scans in y direction
+        obj_mag = self.acquisition_params['objective']['magnification']
+        obj_tube_lens_mm = self.acquisition_params['objective']['tube_lens_f_mm']
+        sensor_pixel_size_um = self.acquisition_params['sensor_pixel_size_um']
+
+        obj_focal_length_mm = obj_tube_lens_mm / obj_mag  # Objective focal length
+        tube_lens_mm = self.acquisition_params['tube_lens_mm']  # Actual tube lens focal length used in your system
+        actual_mag = tube_lens_mm / obj_focal_length_mm  # Actual magnification
+        pixel_size_um = sensor_pixel_size_um / actual_mag
+        # Convert mm to pixels
+        dx_pixels = round(dx_mm * 1000 / pixel_size_um) 
+        dy_pixels = round(dy_mm * 1000 / pixel_size_um)
+        # Calculate max overlaps based on the movement between images and the size of the images
+        
+        #h_max_overlap = max(self.input_width - dx_pixels  - 200, 0)
+        #v_max_overlap = max(self.input_height - dy_pixels - 200, 0)
+
+        h_max_overlap = self.input_width - dx_pixels
+        v_max_overlap = self.input_height - dy_pixels
+        print(v_max_overlap)
+        print(h_max_overlap)
+
+        col_left, col_right = ((self.num_cols - 1) // 2, (self.num_cols - 1) // 2 + 1) 
+        if self.is_reversed['cols']:
+            col_left, col_right = col_right, col_left
+        row_top, row_bottom = ((self.num_cols - 1) // 2, (self.num_cols - 1) // 2 + 1 )
+        if self.is_reversed['rows']:
+            row_top, row_bottom = row_bottom, row_top
+
         img1_path = img2_path_vertical = img2_path_horizontal = None
-        col_left, col_right = (1, 0) if self.is_reversed['cols'] else (0, 1)
-        row_top, row_bottom = (1, 0) if self.is_reversed['rows'] else (0, 1)
         for tile_info in self.stitching_data[channel][z_level]:
             if tile_info['col'] == col_left and tile_info['row'] == row_top:
                 img1_path = os.path.join(self.image_folder, tile_info['filename'])
@@ -172,21 +199,24 @@ class Stitcher:
 
         if img1_path == None:
             raise Exception(f"no input file found for c:{channel} k:{z_level} j:{col_left} i:{row_top}")
-        if img2_path_vertical == None or v_max_overlap == 0:
+        if img2_path_vertical == None or img2_path_vertical == img1_path or v_max_overlap == 0:
             v_shift = (0,0)
         else:
             v_shift = self.calculate_vertical_shift(img1_path, img2_path_vertical, v_max_overlap)
             # check if valid
             # self.v_shift = (self.v_shift[0], 0) if self.v_shift[1] > v_max_overlap * 2 else self.v_shift # bad registration
         
-        if img2_path_horizontal == None or h_max_overlap == 0:
+        if img2_path_horizontal == None or img2_path_horizontal == img1_path or h_max_overlap == 0:
             h_shift = (0,0)
         else:
             h_shift = self.calculate_horizontal_shift(img1_path, img2_path_horizontal, h_max_overlap)
             # check if valid
             # self.h_shift = (0, self.h_shift[1]) if self.h_shift[0] > h_max_overlap * 2 else self.h_shift # bad registration
-
+        print(img1_path, "vertically adjacent to", img2_path_vertical)
+        print(img1_path, "horizintally adjacent to ", img2_path_horizontal)
         # print("vertical shift:", self.v_shift, ", horizontal shift:", self.h_shift)
+        print("v_shift =", v_shift)
+        print("h_shift =", h_shift)
         self.v_shift = v_shift
         self.h_shift = h_shift
 
@@ -210,17 +240,16 @@ class Stitcher:
         for channel_idx, channel in enumerate(self.channel_names):
             for z_level, z_data in self.stitching_data[channel].items():
                 for tile_info in z_data:
-                    self.stitch_single_image(tile_info)
+                    self.stitch_single_image(tile_info, channel_idx, z_level)
                     processed_tiles += 1
                     if progress_callback is not None:
                         progress_callback(processed_tiles, total_tiles)
 
-    def stitch_single_image(self, tile_info):
+    def stitch_single_image(self, tile_info, channel_idx, z_level):
         tile = imread(os.path.join(self.image_folder, tile_info['filename']))[0]
-        z_level = tile_info['z_level']
-        channel = tile_info['channel']
+
         if self.apply_flatfield:
-            tile = (tile / self.flatfields[channel]).clip(min=np.iinfo(self.dtype).min, 
+            tile = (tile / self.flatfields[channel_idx]).clip(min=np.iinfo(self.dtype).min, 
                                                           max=np.iinfo(self.dtype).max).astype(self.dtype)
 
         # Get tile grid location (row, col)
@@ -252,7 +281,7 @@ class Stitcher:
             x += row * self.v_shift[1]  # Moves right if positive
         
         # Place cropped tile on the stitched image canvas
-        self.stitched_images[0, self.channel_names.index(channel), z_level, y:y+tile.shape[-2], x:x+tile.shape[-1]] = tile
+        self.stitched_images[0, channel_idx, z_level, y:y+tile.shape[-2], x:x+tile.shape[-1]] = tile
         # print(f" col:{col}, \trow:{row},\ty:{y}-{y+tile.shape[0]}, \tx:{x}-{x+tile.shape[-1]}")
 
 
