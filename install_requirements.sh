@@ -10,27 +10,27 @@ conda activate stitching
 
 # Update pip in the activated environment to ensure we're using the latest version
 echo "Updating pip..."
-pip install --upgrade pip
+conda run -n stitching pip install --upgrade pip
 
 # Install jax and jaxlib first (general installation)
 echo "Installing general jax and jaxlib dependencies..."
-pip install -U jax jaxlib
+conda run -n stitching pip install -U jax jaxlib
 
 # Define a function to update JAX with CUDA support on Linux
 update_jax_cuda_linux() {
     echo "Updating JAX with CUDA support for Linux..."
-    pip install -U 'jax[cuda12_pip]==0.4.23' --find-links https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
+    conda run -n stitching pip install -U 'jax[cuda12_pip]==0.4.23' --find-links https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
 }
 
 # Define a function to update JAX for CPU on macOS with the specific version
 update_jax_cpu_mac() {
     echo "Updating JAX for CPU on macOS..."
-    pip install -U 'jax[cpu]==0.4.23'
+    conda run -n stitching pip install -U 'jax[cpu]==0.4.23'
 }
 
 # Install other requirements before updating JAX to the specific version needed
 echo "Installing other requirements..."
-pip install -U \
+conda run -n stitching pip install -U \
     PyQt5 \
     dask_image \
     aicsimageio \
