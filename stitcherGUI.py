@@ -1,4 +1,4 @@
-# StitcherGUI.py
+# stitcherGUI.py
 import sys
 import os
 import gc

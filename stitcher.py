@@ -1,4 +1,4 @@
-# Sticher.py 
+# sticher.py 
 import os
 import psutil
 import random
