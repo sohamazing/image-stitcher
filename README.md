@@ -28,7 +28,11 @@ conda activate stitching
 ```
 ### 3. Run Stitcher
 ```bash
-python3 StitcherGUI.py
+python3 stitcherGUI.py
+```
+or
+```bash
+python3 stitcherGUI_v1.py
 ```
 ## User Inputs 
 ### Use Registration to Align
