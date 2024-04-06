@@ -8,7 +8,7 @@ import numpy as np
 import napari
 import psutil
 
-from Stitcher import Stitcher
+from stitcher import Stitcher
 
 class StitchingThread(QThread):
     update_progress = pyqtSignal(int, int)
