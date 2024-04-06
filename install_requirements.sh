@@ -1,11 +1,24 @@
 #!/bin/bash
 
-# Create a conda environment named stitching with Python 3.10
-echo "Creating conda environment 'stitching' with Python 3.10..."
-conda create -y -n stitching python=3.10
+echo "Creating conda environment 'stitching' with Python 3.10 if it doesnt already exist..."
+env_exists=$(conda env list | grep 'stitching' || true)
+    if [ -n "$env_exists" ]; then
+        echo "Environment 'stitching' already exists. Checking Python version..."
+        python_version=$(python --version)
+        if [[ "$python_version" == *"Python 3.10"* ]]; then
+            echo "Python 3.10 is already installed in 'stitching'. Proceeding with activation."
+        else
+            echo "Environment 'stitching' does not have Python 3.10. Recreating environment with Python 3.10..."
+            conda create -y -n stitching python=3.10 --force
+        fi
+    else
+        echo "Creating conda environment 'stitching' with Python 3.10..."
+        conda create -y -n stitching python=3.10
+    fi
 
 # Activate the stitching environment
 echo "Activating the 'stitching' environment..."
+eval "$(conda shell.bash hook)"
 conda activate stitching
 
 # Update pip in the activated environment to ensure we're using the latest version
