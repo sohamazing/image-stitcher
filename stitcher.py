@@ -169,15 +169,15 @@ class Stitcher:
         actual_mag = tube_lens_mm / obj_focal_length_mm  # Actual magnification
         pixel_size_um = sensor_pixel_size_um / actual_mag
         # Convert mm to pixels
-        dx_pixels = round(dx_mm * 1000 / pixel_size_um * 1.05) 
-        dy_pixels = round(dy_mm * 1000 / pixel_size_um * 1.05)
+        dx_pixels = round(dx_mm * 1000 / pixel_size_um)# * 1.05) 
+        dy_pixels = round(dy_mm * 1000 / pixel_size_um)# * 1.05)
         # Calculate max overlaps based on the movement between images and the size of the images
         
-        #h_max_overlap = max(self.input_width - dx_pixels  - 200, 0)
-        #v_max_overlap = max(self.input_height - dy_pixels - 200, 0)
+        h_max_overlap = max(self.input_width - dx_pixels  - 150, 0)
+        v_max_overlap = max(self.input_height - dy_pixels - 150, 0)
 
-        h_max_overlap = max(0, self.input_width - dx_pixels)
-        v_max_overlap = max(0, self.input_height - dy_pixels)
+        #h_max_overlap = max(0, self.input_width - dx_pixels)
+        #v_max_overlap = max(0, self.input_height - dy_pixels)
         print(v_max_overlap)
         print(h_max_overlap)
 
