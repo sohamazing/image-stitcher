@@ -42,7 +42,7 @@ class StitchingThread(QThread):
                 # get acquisition data
                 self.stitcher.extract_acquisition_parameters()
                 self.stitcher.extract_selected_modes()
-                self.stitcher.determine_directions()
+                #self.stitcher.determine_directions()
             except Exception as e:
                 # okay if files not foud
                 self.warning.emit(str(e))
@@ -265,8 +265,8 @@ class StitchingGUI(QWidget):
             self.output_format = ".ome.zarr"
 
         # Check if enough memory available
-        if not self.checkMemoryOk():
-            return
+        # if not self.checkMemoryOk():
+        #    return
         
         # Retrieve registration inputs
         apply_flatfield = self.applyFlatfieldCorrectionCheck.isChecked()

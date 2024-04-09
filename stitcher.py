@@ -169,17 +169,17 @@ class Stitcher:
         actual_mag = tube_lens_mm / obj_focal_length_mm  # Actual magnification
         pixel_size_um = sensor_pixel_size_um / actual_mag
         # Convert mm to pixels
-        dx_pixels = round(dx_mm * 1000 / pixel_size_um)# * 1.05) 
-        dy_pixels = round(dy_mm * 1000 / pixel_size_um)# * 1.05)
+        dx_pixels = round(dx_mm * 1000 / pixel_size_um) 
+        dy_pixels = round(dy_mm * 1000 / pixel_size_um)
         # Calculate max overlaps based on the movement between images and the size of the images
         
-        h_max_overlap = max(self.input_width - dx_pixels  - 150, 0)
-        v_max_overlap = max(self.input_height - dy_pixels - 150, 0)
+        x_overlap_estimate = max(self.input_width - dx_pixels, 0)
+        y_overlap_estimate = max(self.input_height - dy_pixels, 0)
 
-        #h_max_overlap = max(0, self.input_width - dx_pixels)
-        #v_max_overlap = max(0, self.input_height - dy_pixels)
-        print(v_max_overlap)
-        print(h_max_overlap)
+        #x_overlap_estimate = max(0, self.input_width - dx_pixels)
+        #y_overlap_estimate = max(0, self.input_height - dy_pixels)
+        print(y_overlap_estimate)
+        print(x_overlap_estimate)
 
         col_left, col_right = ((self.num_cols - 1) // 2, (self.num_cols - 1) // 2 + 1) 
         if self.is_reversed['cols']:
@@ -199,19 +199,19 @@ class Stitcher:
 
         if img1_path == None:
             raise Exception(f"no input file found for c:{channel} k:{z_level} j:{col_left} i:{row_top}")
-        if img2_path_vertical == None or img2_path_vertical == img1_path or v_max_overlap == 0:
+        if img2_path_vertical == None or img2_path_vertical == img1_path or y_overlap_estimate == 0:
             v_shift = (0,0)
         else:
-            v_shift = self.calculate_vertical_shift(img1_path, img2_path_vertical, v_max_overlap)
+            v_shift = self.calculate_vertical_shift(img1_path, img2_path_vertical, y_overlap_estimate)
             # check if valid
-            # self.v_shift = (self.v_shift[0], 0) if self.v_shift[1] > v_max_overlap * 2 else self.v_shift # bad registration
+            # self.v_shift = (self.v_shift[0], 0) if self.v_shift[1] > y_overlap_estimate * 2 else self.v_shift # bad registration
         
-        if img2_path_horizontal == None or img2_path_horizontal == img1_path or h_max_overlap == 0:
+        if img2_path_horizontal == None or img2_path_horizontal == img1_path or x_overlap_estimate == 0:
             h_shift = (0,0)
         else:
-            h_shift = self.calculate_horizontal_shift(img1_path, img2_path_horizontal, h_max_overlap)
+            h_shift = self.calculate_horizontal_shift(img1_path, img2_path_horizontal, x_overlap_estimate)
             # check if valid
-            # self.h_shift = (0, self.h_shift[1]) if self.h_shift[0] > h_max_overlap * 2 else self.h_shift # bad registration
+            # self.h_shift = (0, self.h_shift[1]) if self.h_shift[0] > x_overlap_estimate * 2 else self.h_shift # bad registration
         print(img1_path, "vertically adjacent to", img2_path_vertical)
         print(img1_path, "horizintally adjacent to ", img2_path_horizontal)
         # print("vertical shift:", self.v_shift, ", horizontal shift:", self.h_shift)

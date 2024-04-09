@@ -267,9 +267,12 @@ class Stitcher:
 
 
     def save_as_ome_tiff(self, well="0",dz_um=None, sensor_pixel_size_um=None):
-        self.output_path = os.path.join(self.input_folder, "stitched_" + well, self.output_name)
-        if not os.path.exists(os.path.join(self.input_folder, "stitched_" + well)):
-            os.makedirs(os.path.join(self.input_folder, "stitched_" + well))
+        if len(self.wells) > 1:
+            self.output_path = os.path.join(self.input_folder, "stitched", well + "_" + self.output_name)
+        else:
+            self.output_path = os.path.join(self.input_folder, "stitched", self.output_name)
+        if not os.path.exists(os.path.join(self.input_folder, "stitched")):
+            os.makedirs(os.path.join(self.input_folder, "stitched"))
 
         ome_metadata = OmeTiffWriter.build_ome(
             image_name=[os.path.basename(self.output_path)],
@@ -290,9 +293,12 @@ class Stitcher:
     def save_as_ome_zarr(self, well="0", dz_um=None, sensor_pixel_size_um=None):
         #print(self.stitched_images.shape)
         #print(self.stitched_images.dtype)
-        self.output_path = os.path.join(self.input_folder, "stitched_" + well, self.output_name)
-        if not os.path.exists(os.path.join(self.input_folder, "stitched_" + well)):
-            os.makedirs(os.path.join(self.input_folder, "stitched_" + well))
+        if len(self.wells) > 1:
+            self.output_path = os.path.join(self.input_folder, "stitched", well + "_" + self.output_name)
+        else:
+            self.output_path = os.path.join(self.input_folder, "stitched", self.output_name)
+        if not os.path.exists(os.path.join(self.input_folder, "stitched")):
+            os.makedirs(os.path.join(self.input_folder, "stitched"))
 
         default_color_hex = 0xFFFFFF        
         default_intensity_min = np.iinfo(self.stitched_images.dtype).min

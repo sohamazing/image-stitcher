@@ -68,7 +68,7 @@ class Stitcher:
         j_rev = not coordinates.sort_values(by='j')['x (mm)'].is_monotonic_increasing
         k_rev = not coordinates.sort_values(by='k')['z (um)'].is_monotonic_increasing
         self.is_reversed = {'rows': i_rev, 'cols': j_rev, 'z-planes': k_rev}
-        # print(self.is_reversed)
+        #print(self.is_reversed)
 
     def parse_filenames(self, four_input_format=False):
         # Read the first image to get its dimensions and dtype
