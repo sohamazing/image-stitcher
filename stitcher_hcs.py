@@ -75,26 +75,34 @@ class Stitcher:
     def parse_filenames(self, four_input_format=False):
         # Read the first image to get its dimensions and dtype
         sorted_input_files = sorted([filename for filename in os.listdir(self.image_folder) 
-                             if filename.endswith(".bmp") or filename.endswith(".tiff")])
+                             if (filename.endswith(".bmp") or filename.endswith(".tiff"))
+                             and 'focus_camera' not in filename])
+        first_filename = sorted_input_files[0]
 
-        for filename in sorted_input_files:
-            if filename.endswith(".bmp") or filename.endswith("Ex.tiff"):
-                four_input_format = True
-            first_image = imread(os.path.join(self.image_folder, filename))
-            self.dtype = np.dtype(first_image.dtype)
-            self.input_height, self.input_width = first_image.shape[-2:]
-            break
+        try:
+            well, i, j, k, channel_name = os.path.splitext(first_filename)[0].split('_', 4)
+            k = int(k)
+            print("well_i_j_k_channel_name: ", os.path.splitext(first_filename)[0])
+            four_input_format = True
+        except ValueError as ve:
+            print("i_j_k_channel_name: ", os.path.splitext(first_filename)[0])
+            four_input_format = False
+
+        first_image = imread(os.path.join(self.image_folder, first_filename))
+        self.dtype = np.dtype(first_image.dtype)
+        self.input_height, self.input_width = first_image.shape[-2:]
+        del first_image
 
         channel_names = set()
         wells = set()
         max_i = max_j = max_k = 0
-        well = '0'
         # Read all image filenames to get data for stitching 
         for filename in sorted_input_files:
             if four_input_format == True:
                 well, i, j, k, channel_name = os.path.splitext(filename)[0].split('_', 4) 
             else:
                 i, j, k, channel_name = os.path.splitext(filename)[0].split('_', 3)
+                well = '0'
 
             i, j, k = int(i), int(j), int(k)
             channel_names.add(channel_name)
@@ -200,17 +208,23 @@ class Stitcher:
         self.v_shift = v_shift
         self.h_shift = h_shift
 
-    def get_tczyx_shape(self):
-        """Estimates the memory usage for the stitched image array."""
-        element_size = np.dtype(self.dtype).itemsize  # Byte size of one array element
+    def init_output(self, well):
+        if len(self.wells) > 1:
+            self.output_path = os.path.join(self.input_folder, "stitched", well + "_" + self.output_name)
+        else:
+            self.output_path = os.path.join(self.input_folder, "stitched", self.output_name)
+        if not os.path.exists(os.path.join(self.input_folder, "stitched")):
+            os.makedirs(os.path.join(self.input_folder, "stitched"))
+
         x_max = self.input_width + ((self.num_cols - 1) * (self.input_width + self.h_shift[1])) + abs((self.num_rows - 1) * self.v_shift[1])
         y_max = self.input_height + ((self.num_rows - 1) * (self.input_height + self.v_shift[0])) + abs((self.num_cols - 1) * self.h_shift[0])
         tczyx_shape = (1, len(self.channel_names), self.num_z, y_max, x_max)
-        memory_bytes = np.prod(tczyx_shape) * element_size # # Total memory in bytes
-        return tczyx_shape, memory_bytes // 2 # needs less with dask
+        # element_size = np.dtype(self.dtype).itemsize  # Byte size of one array element
+        # memory_bytes = np.prod(tczyx_shape) * element_size # # Total memory in bytes
+        return tczyx_shape #, memory_bytes
 
     def stitch_images_cropped(self, well="", progress_callback=None):
-        tczyx_shape, _ = self.get_tczyx_shape()
+        tczyx_shape = self.init_output(well)
         chunks = (1, 1, 1, self.input_height, self.input_width)
         self.stitched_images = da.zeros(tczyx_shape, dtype=self.dtype, chunks=chunks)
         # print(self.stitched_images.shape)
@@ -266,14 +280,7 @@ class Stitcher:
         # print(f" col:{col}, \trow:{row},\ty:{y}-{y+tile.shape[0]}, \tx:{x}-{x+tile.shape[-1]}")
 
 
-    def save_as_ome_tiff(self, well="0",dz_um=None, sensor_pixel_size_um=None):
-        if len(self.wells) > 1:
-            self.output_path = os.path.join(self.input_folder, "stitched", well + "_" + self.output_name)
-        else:
-            self.output_path = os.path.join(self.input_folder, "stitched", self.output_name)
-        if not os.path.exists(os.path.join(self.input_folder, "stitched")):
-            os.makedirs(os.path.join(self.input_folder, "stitched"))
-
+    def save_as_ome_tiff(self,dz_um=None, sensor_pixel_size_um=None):
         ome_metadata = OmeTiffWriter.build_ome(
             image_name=[os.path.basename(self.output_path)],
             data_shapes=[self.stitched_images.shape],
@@ -290,16 +297,9 @@ class Stitcher:
         )
         self.stitched_images = None
 
-    def save_as_ome_zarr(self, well="0", dz_um=None, sensor_pixel_size_um=None):
+    def save_as_ome_zarr(self, dz_um=None, sensor_pixel_size_um=None):
         #print(self.stitched_images.shape)
         #print(self.stitched_images.dtype)
-        if len(self.wells) > 1:
-            self.output_path = os.path.join(self.input_folder, "stitched", well + "_" + self.output_name)
-        else:
-            self.output_path = os.path.join(self.input_folder, "stitched", self.output_name)
-        if not os.path.exists(os.path.join(self.input_folder, "stitched")):
-            os.makedirs(os.path.join(self.input_folder, "stitched"))
-
         default_color_hex = 0xFFFFFF        
         default_intensity_min = np.iinfo(self.stitched_images.dtype).min
         default_intensity_max = np.iinfo(self.stitched_images.dtype).max

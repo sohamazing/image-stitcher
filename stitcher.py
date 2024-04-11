@@ -68,20 +68,29 @@ class Stitcher:
         j_rev = not coordinates.sort_values(by='j')['x (mm)'].is_monotonic_increasing
         k_rev = not coordinates.sort_values(by='k')['z (um)'].is_monotonic_increasing
         self.is_reversed = {'rows': i_rev, 'cols': j_rev, 'z-planes': k_rev}
-        # print(self.is_reversed)
+        print(self.is_reversed)
 
     def parse_filenames(self, four_input_format=False):
         # Read the first image to get its dimensions and dtype
         sorted_input_files = sorted([filename for filename in os.listdir(self.image_folder) 
-                             if filename.endswith(".bmp") or filename.endswith(".tiff")])
+                             if (filename.endswith(".bmp") or filename.endswith(".tiff"))
+                             and 'focus_camera' not in filename])
 
-        for filename in sorted_input_files:
-            if filename.endswith(".bmp") or filename.endswith("Ex.tiff"):
-                four_input_format = True
-            first_image = imread(os.path.join(self.image_folder, filename))
-            self.dtype = np.dtype(first_image.dtype)
-            self.input_height, self.input_width = first_image.shape[-2:]
-            break
+        first_filename = sorted_input_files[0]
+
+        try:
+            well, i, j, k, channel_name = os.path.splitext(first_filename)[0].split('_', 4)
+            k = int(k)
+            print("well_i_j_k_channel_name: ", os.path.splitext(first_filename)[0])
+            four_input_format = True
+        except ValueError as ve:
+            print("i_j_k_channel_name: ", os.path.splitext(first_filename)[0])
+            four_input_format = False
+
+        first_image = imread(os.path.join(self.image_folder, first_filename))
+        self.dtype = np.dtype(first_image.dtype)
+        self.input_height, self.input_width = first_image.shape[-2:]
+        del first_image
 
         channel_names = set()
         max_i = max_j = max_k = 0

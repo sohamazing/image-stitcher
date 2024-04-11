@@ -65,9 +65,9 @@ class StitchingThread(QThread):
                 sensor_pixel_size_um = self.stitcher.acquisition_params.get("sensor_pixel_size_um", None)
                 self.saving_started.emit()
                 if self.output_format == ".ome.tiff":
-                    self.stitcher.save_as_ome_tiff(well, dz_um=dz_um, sensor_pixel_size_um=sensor_pixel_size_um)
+                    self.stitcher.save_as_ome_tiff(dz_um=dz_um, sensor_pixel_size_um=sensor_pixel_size_um)
                 elif self.output_format == ".ome.zarr":
-                    self.stitcher.save_as_ome_zarr(well, dz_um=dz_um, sensor_pixel_size_um=sensor_pixel_size_um)
+                    self.stitcher.save_as_ome_zarr(dz_um=dz_um, sensor_pixel_size_um=sensor_pixel_size_um)
                 self.saving_finished.emit(self.stitcher.output_path, self.stitcher.dtype)
 
         except Exception as e:
