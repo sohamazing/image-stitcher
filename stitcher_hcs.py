@@ -279,7 +279,6 @@ class Stitcher:
         self.stitched_images[0, self.channel_names.index(channel), z_level, y:y+tile.shape[-2], x:x+tile.shape[-1]] = tile
         # print(f" col:{col}, \trow:{row},\ty:{y}-{y+tile.shape[0]}, \tx:{x}-{x+tile.shape[-1]}")
 
-
     def save_as_ome_tiff(self,dz_um=None, sensor_pixel_size_um=None):
         ome_metadata = OmeTiffWriter.build_ome(
             image_name=[os.path.basename(self.output_path)],
