@@ -25,7 +25,7 @@ class Stitcher:
         self.output_name = output_name
         self.output_path = ""
         self.processed_files = set()
-        self.is_reversed = {'rows': False, 'cols': False, 'z-planes': False}
+        self.is_reversed = {'rows': False, 'cols': True, 'z-planes': False}
         self.selected_modes = {}
         self.acquisition_params = {}
         self.channel_names = []
@@ -63,12 +63,14 @@ class Stitcher:
 
     def determine_directions(self):
         coordinates = pd.read_csv(os.path.join(self.image_folder, 'coordinates.csv'))
+        try:
+            first_well = coordinates['well'].unique()[0]
+            coordinates = coordinates[coordinates['well'] == first_well]
+        except Exception as e:
+            print("no coordinates.csv well data:", e)
         i_rev = not coordinates.sort_values(by='i')['y (mm)'].is_monotonic_increasing
-        print(coordinates.sort_values(by='i'))
         j_rev = not coordinates.sort_values(by='j')['x (mm)'].is_monotonic_increasing
-        print(coordinates.sort_values(by='j'))
         k_rev = not coordinates.sort_values(by='k')['z (um)'].is_monotonic_increasing
-        print(coordinates.sort_values(by='k'))
         self.is_reversed = {'rows': i_rev, 'cols': j_rev, 'z-planes': k_rev}
         print(self.is_reversed)
 

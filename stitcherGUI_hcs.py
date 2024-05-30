@@ -41,7 +41,7 @@ class StitchingThread(QThread):
                 # get acquisition data
                 self.stitcher.extract_acquisition_parameters()
                 self.stitcher.extract_selected_modes()
-                #self.stitcher.determine_directions()
+                self.stitcher.determine_directions()
             except Exception as e:
                 # okay if files not foud
                 self.warning.emit(str(e))
@@ -225,31 +225,6 @@ class StitchingGUI(QWidget):
             self.channelDropdown.clear()
             self.channelDropdown.hide()
             self.adjustSize()
-
-    def checkMemoryOk(self):
-        temp_stitcher = Stitcher(self.inputDirectory)
-        temp_stitcher.parse_filenames()  # Make sure this is necessary for the memory estimate
-        try:
-            temp_stitcher.determine_directions()
-        except: 
-            pass
-        temp_stitcher.calculate_shifts(v_max_overlap=self.v_max_overlap, h_max_overlap=self.h_max_overlap)
-        _, estimated_memory = temp_stitcher.get_tczyx_shape()
-        available_memory = psutil.virtual_memory().available
-
-        if estimated_memory > available_memory:
-            msgBox = QMessageBox()
-            msgBox.setIcon(QMessageBox.Warning)
-            msgBox.setWindowTitle("Memory Warning")
-            msgBox.setText("Proceed with Insufficient Memory for Image Stitching?")
-            msgBox.setInformativeText(f"Required: {estimated_memory} B\n"
-                                      f"Available: {available_memory} B\n")
-            msgBox.addButton(QMessageBox.No)
-            msgBox.addButton(QMessageBox.Yes)
-            msgBox.setDefaultButton(QMessageBox.No)
-            response = msgBox.exec()
-            return response == QMessageBox.Yes
-        return True
                  
 
     def startProcess(self):
@@ -265,8 +240,8 @@ class StitchingGUI(QWidget):
             self.output_format = ".ome.zarr"
 
         # Check if enough memory available
-        if not self.checkMemoryOk():
-            return
+        # if not self.checkMemoryOk():
+        #     return
         
         # Retrieve registration inputs
         apply_flatfield = self.applyFlatfieldCorrectionCheck.isChecked()

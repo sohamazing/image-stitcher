@@ -83,7 +83,7 @@ class StitchingGUI(QWidget):
         self.viewBtn.setEnabled(False)
         self.layout.addWidget(self.viewBtn)
 
-        self.setWindowTitle('Stitching Application')
+        self.setWindowTitle('Cephla Image Stitcher')
         self.setGeometry(300, 300, 500, 200)
         self.show()
 
@@ -208,6 +208,7 @@ class StitchingGUI(QWidget):
         self.output_path = path
         self.dtype = np.dtype(dtype)
         self.contrast_limits = self.determineContrastLimits(self.dtype)
+        self.setGeometry(300, 300, 500, 200)
 
     def determineContrastLimits(self, dtype):
         if dtype == np.uint16:

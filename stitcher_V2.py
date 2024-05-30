@@ -1,5 +1,6 @@
 import os
 import psutil
+import shutil
 import random
 import json
 from lxml import etree
@@ -9,15 +10,16 @@ import cv2
 import dask.array as da
 from dask_image.imread import imread as dask_imread
 from skimage.registration import phase_cross_correlation
+import ome_zarr
+import zarr
 from aicsimageio.writers import OmeTiffWriter
 from aicsimageio.writers import OmeZarrWriter
 from aicsimageio import types
 from basicpy import BaSiC
 from PyQt5.QtCore import pyqtSignal, QThread, QObject
-import shutil
+
 
 STITCH_COMPLETE_ACQUISITION = True
-PIXEL_SIZE_UM = 0.6
 
 class Stitcher(QThread, QObject):
 
@@ -227,7 +229,7 @@ class Stitcher(QThread, QObject):
             combined_image = np.vstack((img1, img2))
         cv2.imwrite(f"{title}.png", combined_image)
 
-    def calculate_horizontal_shift(self, img1_path, img2_path, max_overlap, margin_ratio=0.1):
+    def calculate_horizontal_shift(self, img1_path, img2_path, max_overlap, margin_ratio=0.2):
         try:
             img1 = dask_imread(img1_path)[0].compute()
             img2 = dask_imread(img2_path)[0].compute()
@@ -245,7 +247,7 @@ class Stitcher(QThread, QObject):
             print(f"Error calculating horizontal shift: {e}")
             return (0, 0)
 
-    def calculate_vertical_shift(self, img1_path, img2_path, max_overlap, margin_ratio=0.1):
+    def calculate_vertical_shift(self, img1_path, img2_path, max_overlap, margin_ratio=0.2):
         try:
             img1 = dask_imread(img1_path)[0].compute()
             img2 = dask_imread(img2_path)[0].compute()
@@ -287,8 +289,8 @@ class Stitcher(QThread, QObject):
         #max_x_overlap = max(0, int(self.input_width - dx_pixels)) // 2
         #max_y_overlap = max(0, int(self.input_height - dy_pixels)) // 2
         
-        max_x_overlap = int(self.input_width - dx_pixels) // 2
-        max_y_overlap = int(self.input_height - dy_pixels) // 2
+        max_x_overlap = abs(int(self.input_width - dx_pixels) // 2)
+        max_y_overlap = abs(int(self.input_height - dy_pixels) // 2)
         print("objective calculated - vertical overlap:", max_y_overlap, ", horizontal overlap:", max_x_overlap)
 
         
