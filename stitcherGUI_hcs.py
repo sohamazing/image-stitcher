@@ -40,8 +40,8 @@ class StitchingThread(QThread):
             try:
                 # get acquisition data
                 self.stitcher.extract_acquisition_parameters()
-                self.stitcher.extract_selected_modes()
-                self.stitcher.determine_directions()
+                #self.stitcher.extract_selected_modes()
+                #self.stitcher.determine_directions()
             except Exception as e:
                 # okay if files not foud
                 self.warning.emit(str(e))

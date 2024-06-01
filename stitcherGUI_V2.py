@@ -4,6 +4,7 @@ import napari
 import numpy as np
 from PyQt5.QtWidgets import (QApplication, QWidget, QVBoxLayout, QPushButton, QLabel, QProgressBar, QComboBox, QMessageBox, QCheckBox, QSpinBox, QLineEdit, QFileDialog)
 from PyQt5.QtCore import QObject, pyqtSignal
+from napari.utils.colormaps import Colormap
 
 from stitcher_V2 import Stitcher  # Make sure to import your actual stitcher class
 
@@ -57,7 +58,7 @@ class StitchingGUI(QWidget):
         self.layout.addWidget(self.outputFormatCombo)
 
         # Output name entry
-        self.outputNameLabel = QLabel('Enter Output Name (no extension)', self)
+        self.outputNameLabel = QLabel('Enter Experiment Name', self)
 
         self.outputNameEdit = QLineEdit(self)
         self.layout.addWidget(self.outputNameLabel)
@@ -77,6 +78,11 @@ class StitchingGUI(QWidget):
         self.startBtn.clicked.connect(self.onStitchingStart)
         self.layout.addWidget(self.startBtn)
 
+        # Output path QLineEdit
+        self.outputPathEdit = QLineEdit(self)
+        self.outputPathEdit.setPlaceholderText("Enter Filepath To Visualize (No Stitching Required)")
+        self.layout.addWidget(self.outputPathEdit)
+
         # View in Napari button
         self.viewBtn = QPushButton('View Output in Napari', self)
         self.viewBtn.clicked.connect(self.onViewOutput)
@@ -91,6 +97,7 @@ class StitchingGUI(QWidget):
         self.inputDirectory = QFileDialog.getExistingDirectory(self, "Select Input Image Folder")
         if self.inputDirectory:
             self.inputDirectoryBtn.setText(f'Selected: {self.inputDirectory}')
+            self.onRegistrationCheck(self.useRegistrationCheck.isChecked())
 
     def onRegistrationCheck(self, checked):
         if checked:
@@ -172,6 +179,7 @@ class StitchingGUI(QWidget):
                 registration_z_level=z_level,
             )
             self.setupConnections()
+            self.outputPathEdit.setText(f"{self.inputDirectory}/{output_name}_complete_acquisition{output_format}")
             self.stitcher.start()
             self.progressBar.show()
         except Exception as e:
@@ -205,29 +213,73 @@ class StitchingGUI(QWidget):
         self.progressBar.hide()
         self.viewBtn.setEnabled(True)
         self.statusLabel.setText("Saving completed. Ready to view.")
+        self.outputPathEdit.setText(path)
         self.output_path = path
         self.dtype = np.dtype(dtype)
-        self.contrast_limits = self.determineContrastLimits(self.dtype)
+        if dtype == np.uint16:
+            c = [0, 65535]
+        elif dtype == np.uint8:
+            c = [0, 255]
+        else:
+            c = None
+        self.contrast_limits = c
         self.setGeometry(300, 300, 500, 200)
 
-    def determineContrastLimits(self, dtype):
-        if dtype == np.uint16:
-            return [0, 65535]
-        elif dtype == np.uint8:
-            return [0, 255]
-        return None
+    
 
     def onErrorOccurred(self, error):
         QMessageBox.critical(self, "Error", f"Error while processing: {error}")
         self.statusLabel.setText("Error occurred!")
 
     def onViewOutput(self):
+        output_path = self.outputPathEdit.text()
+        output_format = ".ome.zarr" if output_path.endswith(".ome.zarr") else None
         try:
             viewer = napari.Viewer()
-            viewer.open(self.output_path, plugin='napari-ome-zarr', contrast_limits=self.contrast_limits)
-            napari.run(max_loop_level=2)
+            if output_format:
+                viewer.open(output_path, plugin='napari-ome-zarr', contrast_limits=self.contrast_limits)
+            else:
+                viewer.open(output_path)  # Open without specifying plugin
+
+            for layer in viewer.layers:
+                color = self.hexToColormap(self.getChannelColor(layer.name))
+                layer.contrast_limits = self.determineContrastLimits(layer.data)
+                layer.colormap = color
+            napari.run()
         except Exception as e:
             QMessageBox.critical(self, "Error Opening in Napari", str(e))
+
+    def getChannelColor(self, channel_name):
+        channel_colors = {
+            '405': '#3300FF',
+            '488': '#1FFF00',
+            '561': '#FFCF00',
+            '638': '#FF0000',
+            '730': '#770000'   # Dark red
+        }
+        for wavelength, color in channel_colors.items():
+            if wavelength in channel_name:
+                return color
+        return '#FFFFFF'  # Default white for others
+
+    def hexToColormap(self, hex_color):
+        # Map to predefined Napari colormaps or create custom colormap
+        predefined_colormaps = {
+            '#3300FF': 'blue',
+            '#1FFF00': 'green',
+            '#FFCF00': 'yellow',
+            '#FF0000': 'red'
+        }
+        if hex_color in predefined_colormaps:
+            return predefined_colormaps[hex_color]
+        else:
+            # Create custom colormap from hex
+            color_rgba = [int(hex_color[i:i+2], 16) / 255.0 for i in (1, 3, 5)] + [1.0]
+            return Colormap([color_rgba])
+
+    def determineContrastLimits(self, data):
+        # This is a simple method to set contrast limits based on data percentiles
+        return [np.percentile(data, 1), np.percentile(data, 99)]
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)

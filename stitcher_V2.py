@@ -216,6 +216,33 @@ class Stitcher(QThread, QObject):
                 images = [dask_imread(os.path.join(self.image_folder, tile['filename']))[0] for tile in channel_tiles]
                 process_images(images, channel)
 
+    def get_flatfields_well(self, well, progress_callback=None):
+        def process_images(images, channel_name):
+            images = np.array(images)
+            basic = BaSiC(get_darkfield=False, smoothness_flatfield=1)
+            basic.fit(images)
+            channel_index = self.mono_channel_names.index(channel_name)
+            self.flatfields[channel_index] = basic.flatfield
+            if progress_callback:
+                progress_callback(channel_index + 1, self.num_c)
+
+        for channel in self.channel_names:
+            channel_tiles = [tile_info for z_data in self.stitching_data[well][channel].values()
+                                       for tile_info in z_data]
+            random.shuffle(channel_tiles)
+            channel_tiles = channel_tiles[:min(32, len(channel_tiles))]
+
+            if self.is_rgb[channel]:
+                images_r = [dask_imread(os.path.join(self.image_folder, tile['filename']))[0][:, :, 0] for tile in channel_tiles]
+                images_g = [dask_imread(os.path.join(self.image_folder, tile['filename']))[0][:, :, 1] for tile in channel_tiles]
+                images_b = [dask_imread(os.path.join(self.image_folder, tile['filename']))[0][:, :, 2] for tile in channel_tiles]
+                process_images(images_r, channel + ' R')
+                process_images(images_g, channel + ' G')
+                process_images(images_b, channel + ' B')
+            else:
+                images = [dask_imread(os.path.join(self.image_folder, tile['filename']))[0] for tile in channel_tiles]
+                process_images(images, channel)
+
     def normalize_image(self, img):
         img_min, img_max = img.min(), img.max()
         img_normalized = (img - img_min) / (img_max - img_min)
@@ -289,8 +316,8 @@ class Stitcher(QThread, QObject):
         #max_x_overlap = max(0, int(self.input_width - dx_pixels)) // 2
         #max_y_overlap = max(0, int(self.input_height - dy_pixels)) // 2
         
-        max_x_overlap = abs(int(self.input_width - dx_pixels) // 2)
-        max_y_overlap = abs(int(self.input_height - dy_pixels) // 2)
+        max_x_overlap = round(abs(self.input_width - dx_pixels) / 2)
+        max_y_overlap = round(abs(self.input_height - dy_pixels) / 2)
         print("objective calculated - vertical overlap:", max_y_overlap, ", horizontal overlap:", max_x_overlap)
 
         
@@ -441,11 +468,35 @@ class Stitcher(QThread, QObject):
         default_color_hex = 0xFFFFFF        
         intensity_min = np.iinfo(self.dtype).min
         intensity_max = np.iinfo(self.dtype).max
-
-        #channel_colors = [self.configurationManager.get_color_for_channel(c) for c in self.mono_channel_names]
-        channel_colors = [default_color_hex] * self.num_c
         channel_minmax = [(intensity_min, intensity_max)] * self.num_c
-        dims = "TCZYX"
+
+        channel_colors_hex = {
+            '405': 0x3300FF,  # Blue
+            '488': 0x1FFF00,  # Green
+            '561': 0xFFCF00,  # Yellow
+            '638': 0xFF0000,  # Red
+            '730': 0x770000   # Dark Red
+        }
+        def extract_wavelength(name):
+            # Split the string and find the wavelength number immediately after "Fluorescence"
+            parts = name.split()
+            if 'Fluorescence' in parts:
+                index = parts.index('Fluorescence') + 1
+                if index < len(parts):
+                    return parts[index].split()[0]  # Assuming '488 nm Ex' and taking '488'
+            return None
+
+        # Process each channel name in self.mono_channel_names to find corresponding colors
+        channel_colors = []
+        for name in self.mono_channel_names:
+            wavelength = extract_wavelength(name)
+            color_hex = channel_colors_hex.get(wavelength, default_color_hex)  # Default to white if not matched
+            channel_colors.append(color_hex)
+
+        # Simulate saving process with channel colors
+        # This part would integrate with actual OME-Zarr writing functions
+        print("Channel colors:", channel_colors)
+        print("Channel intensity ranges:", channel_minmax)
 
         zarr_writer = OmeZarrWriter(self.output_path)
         zarr_writer.build_ome(
@@ -461,7 +512,7 @@ class Stitcher(QThread, QObject):
             physical_pixel_sizes=types.PhysicalPixelSizes(dz_um, sensor_pixel_size_um, sensor_pixel_size_um),
             channel_names=self.mono_channel_names,
             channel_colors=channel_colors,
-            dimension_order=dims,
+            dimension_order="TCZYX",
             scale_num_levels=5,
             chunk_dims=self.chunks
         )
@@ -628,6 +679,11 @@ class Stitcher(QThread, QObject):
                     self.calculate_shifts()
 
                 for well in self.wells:
+                    # if self.apply_flatfield:
+                    #     print(f"getting {well} flatfields...")
+                    #     self.getting_flatfields.emit()
+                    #     self.get_flatfields_well(well, progress_callback=self.update_progress.emit)
+
                     self.starting_stitching.emit()
                     print(f"stitching...")
                     self.stitch_images(time_point, well, progress_callback=self.update_progress.emit)

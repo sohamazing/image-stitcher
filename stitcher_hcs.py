@@ -25,7 +25,9 @@ class Stitcher:
         self.output_name = output_name
         self.output_path = ""
         self.processed_files = set()
-        self.is_reversed = {'rows': False, 'cols': True, 'z-planes': False}
+        self.is_reversed = {'rows': False, 
+                            'cols': False, 
+                            'z-planes': False}
         self.selected_modes = {}
         self.acquisition_params = {}
         self.channel_names = []
@@ -60,6 +62,9 @@ class Stitcher:
         acquistion_params_path = os.path.join(self.input_folder, 'acquisition parameters.json')
         with open(acquistion_params_path, 'r') as file:
             self.acquisition_params = json.load(file)
+        self.is_reversed = {'rows': self.acquisition_params.get("row direction", False), 
+            'cols': self.acquisition_params.get("col direction", False), 
+            'z-planes': False}
 
     def determine_directions(self):
         coordinates = pd.read_csv(os.path.join(self.image_folder, 'coordinates.csv'))
@@ -71,7 +76,11 @@ class Stitcher:
         i_rev = not coordinates.sort_values(by='i')['y (mm)'].is_monotonic_increasing
         j_rev = not coordinates.sort_values(by='j')['x (mm)'].is_monotonic_increasing
         k_rev = not coordinates.sort_values(by='k')['z (um)'].is_monotonic_increasing
-        self.is_reversed = {'rows': i_rev, 'cols': j_rev, 'z-planes': k_rev}
+        # self.is_reversed = {'rows': self.acquisition_params.get("row direction", False), 
+        #                     'cols': self.acquisition_params.get("col direction", False), 
+        #                     'z-planes': False}
+
+        # self.is_reversed = {'rows': i_rev, 'cols': j_rev, 'z-planes': k_rev}
         print(self.is_reversed)
 
     def parse_filenames(self, four_input_format=False):
