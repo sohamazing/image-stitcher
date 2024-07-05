@@ -3,9 +3,8 @@ import napari
 import numpy as np
 from PyQt5.QtWidgets import (QApplication, QWidget, QVBoxLayout, QPushButton, QLabel, QProgressBar, QComboBox, QMessageBox, QCheckBox, QSpinBox, QLineEdit, QFileDialog)
 from PyQt5.QtCore import QObject, pyqtSignal
-from napari.utils.colormaps import Colormap
-
-from stitcher import Stitcher  # Import your updated stitcher class
+from napari.utils.colormaps import Colormap, AVAILABLE_COLORMAPS
+from stitcher import Stitcher, CHANNEL_COLORS_MAP
 
 class StitchingGUI(QWidget):
     def __init__(self):
@@ -232,50 +231,52 @@ class StitchingGUI(QWidget):
         output_format = ".ome.zarr" if output_path.endswith(".ome.zarr") else None
         try:
             viewer = napari.Viewer()
-            if output_format:
-                viewer.open(output_path, plugin='napari-ome-zarr', contrast_limits=self.contrast_limits)
+            if ".ome.zarr" in output_path:
+                viewer.open(output_path, plugin='napari-ome-zarr')
             else:
-                viewer.open(output_path)  # Open without specifying plugin
+                viewer.open(output_path)
 
             for layer in viewer.layers:
-                color = self.hexToColormap(self.getChannelColor(layer.name))
-                layer.contrast_limits = self.determineContrastLimits(layer.data)
-                layer.colormap = color
+                wavelength = self.extractWavelength(layer.name)
+                channel_info = CHANNEL_COLORS_MAP.get(wavelength, {'hex': 0xFFFFFF, 'name': 'gray'})
+
+                # Set colormap
+                if channel_info['name'] in AVAILABLE_COLORMAPS:
+                    layer.colormap = AVAILABLE_COLORMAPS[channel_info['name']]
+                else:
+                    layer.colormap = self.generateColormap(channel_info)
+
+                # Set contrast limits based on dtype
+                if np.issubdtype(layer.data.dtype, np.integer):
+                    info = np.iinfo(layer.data.dtype)
+                    layer.contrast_limits = (info.min, info.max)
+                elif np.issubdtype(layer.data.dtype, np.floating):
+                    layer.contrast_limits = (0.0, 1.0)
+
             napari.run()
         except Exception as e:
             QMessageBox.critical(self, "Error Opening in Napari", str(e))
+            print(f"An error occurred while opening output in Napari: {e}")
 
-    def getChannelColor(self, channel_name):
-        channel_colors = {
-            '405': '#3300FF',
-            '488': '#1FFF00',
-            '561': '#FFCF00',
-            '638': '#FF0000',
-            '730': '#770000'   # Dark red
-        }
-        for wavelength, color in channel_colors.items():
-            if wavelength in channel_name:
+    def extractWavelength(self, name):
+        # Split the string and find the wavelength number immediately after "Fluorescence"
+        parts = name.split()
+        if 'Fluorescence' in parts:
+            index = parts.index('Fluorescence') + 1
+            if index < len(parts):
+                return parts[index].split()[0]  # Assuming '488 nm Ex' and taking '488'
+        for color in ['R', 'G', 'B']:
+            if color in parts or "full_" + color in parts:
                 return color
-        return '#FFFFFF'  # Default white for others
+        return None
 
-    def hexToColormap(self, hex_color):
-        # Map to predefined Napari colormaps or create custom colormap
-        predefined_colormaps = {
-            '#3300FF': 'blue',
-            '#1FFF00': 'green',
-            '#FFCF00': 'yellow',
-            '#FF0000': 'red'
-        }
-        if hex_color in predefined_colormaps:
-            return predefined_colormaps[hex_color]
-        else:
-            # Create custom colormap from hex
-            color_rgba = [int(hex_color[i:i+2], 16) / 255.0 for i in (1, 3, 5)]
-            return Colormap([color_rgb])
-
-    def determineContrastLimits(self, data):
-        # This is a simple method to set contrast limits based on data percentiles
-        return [np.percentile(data, 1), np.percentile(data, 99)]
+    def generateColormap(self, channel_info):
+        """Convert a HEX value to a normalized RGB tuple."""
+        c0 = (0, 0, 0)
+        c1 = (((channel_info['hex'] >> 16) & 0xFF) / 255,  # Normalize the Red component
+              ((channel_info['hex'] >> 8) & 0xFF) / 255,   # Normalize the Green component
+              (channel_info['hex'] & 0xFF) / 255)          # Normalize the Blue component
+        return Colormap(colors=[c0, c1], controls=[0, 1], name=channel_info['name'])
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)
