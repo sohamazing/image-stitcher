@@ -157,9 +157,12 @@ class Stitcher(QThread, QObject):
         self.init_stitching_parameters()
 
         all_files = os.listdir(self.image_folder)
-        sorted_input_files = sorted(
-            [filename for filename in all_files if filename.endswith((".bmp", ".tiff")) and 'focus_camera' not in filename]
-        )
+        sorted_input_files = sorted([
+            filename for filename in all_files
+            if filename.endswith((".bmp", ".tiff"))
+            and 'focus_camera' not in filename
+            and 'laser_af_camera' not in filename
+        ])
         if not sorted_input_files:
             raise Exception("No valid files found in directory.")
 
@@ -760,5 +763,5 @@ class Stitcher(QThread, QObject):
             print("total time to stitch + save:", time.time() - stime)
 
         except Exception as e:
-            print("time before error", scatime - sttime)
+            print("time before error", time.time() - stime)
             print(f"error While Stitching: {e}")
