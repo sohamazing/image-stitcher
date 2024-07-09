@@ -27,6 +27,7 @@ from basicpy import BaSiC
 STITCH_COMPLETE_ACQUISITION = True # stitch together wells and timepoints 
 FULL_REGISTRATION = False # dynamic registartion
 IS_HCS = True
+REVERSE_ROWS = True
 CHANNEL_COLORS_MAP = {
     '405':      {'hex': 0x3300FF, 'name': 'blue'},
     '488':      {'hex': 0x1FFF00, 'name': 'green'},
@@ -37,6 +38,7 @@ CHANNEL_COLORS_MAP = {
     'G':        {'hex': 0x1FFF00, 'name': 'green'},
     'B':        {'hex': 0x3300FF, 'name': 'blue'}
 }
+
 
 class Stitcher(QThread, QObject):
 
@@ -146,6 +148,7 @@ class Stitcher(QThread, QObject):
             self.is_wellplate = False
 
         i_rev = not coordinates.sort_values(by='i')['y (mm)'].is_monotonic_increasing
+        i_rev = not i_rev if REVERSE_ROWS else not i_rev
         j_rev = not coordinates.sort_values(by='j')['x (mm)'].is_monotonic_increasing
         k_rev = not coordinates.sort_values(by='k')['z (um)'].is_monotonic_increasing
         return {'rows': i_rev, 'cols': j_rev, 'z-planes': k_rev}
@@ -161,7 +164,7 @@ class Stitcher(QThread, QObject):
             filename for filename in all_files
             if filename.endswith((".bmp", ".tiff"))
             and 'focus_camera' not in filename
-            and 'laser_af_camera' not in filename
+            and 'laser af camera' not in filename
         ])
         if not sorted_input_files:
             raise Exception("No valid files found in directory.")
@@ -383,10 +386,26 @@ class Stitcher(QThread, QObject):
     def calculate_dynamic_shifts(self, well, channel, z_level, row, col):
         h_shift, v_shift = self.h_shift, self.v_shift
 
+        if self.is_reversed['rows']:
+            curr_row = self.num_rows - 1 - row
+            top_row = row + 1
+        else:
+            curr_row = row
+            top_row = row - 1
+
+        if self.is_reversed['cols']:
+            curr_col = self.num_cols - 1 - col
+            left_col = col + 1
+        else:
+            curr_col = col
+            left_col = col - 1
+
+        current_tile_path = self.stitching_data[well][channel][z_level][curr_row, curr_col]['filepath']
+
         # Check for left neighbor
-        if (row, col - 1) in self.stitching_data[well][channel][z_level]:
-            left_tile_path = self.stitching_data[well][channel][z_level][row, col - 1]['filepath']
-            current_tile_path = self.stitching_data[well][channel][z_level][row, col]['filepath']
+        if (row, left_col) in self.stitching_data[well][channel][z_level]:
+            left_tile_path = self.stitching_data[well][channel][z_level][curr_row, left_col]['filepath']
+
             # Calculate horizontal shift
             new_h_shift = self.calculate_horizontal_shift(left_tile_path, current_tile_path, abs(self.h_shift[1]))
 
@@ -397,9 +416,9 @@ class Stitcher(QThread, QObject):
                 h_shift = new_h_shift
 
         # Check for top neighbor
-        if (row - 1, col) in self.stitching_data[well][channel][z_level]:
-            top_tile_path = self.stitching_data[well][channel][z_level][row - 1, col]['filepath']
-            current_tile_path = self.stitching_data[well][channel][z_level][row, col]['filepath']
+        if (top_row, col) in self.stitching_data[well][channel][z_level]:
+            top_tile_path = self.stitching_data[well][channel][z_level][top_row, curr_col]['filepath']
+
             # Calculate vertical shift
             new_v_shift = self.calculate_vertical_shift(top_tile_path, current_tile_path, abs(self.v_shift[0]))
 
@@ -441,21 +460,23 @@ class Stitcher(QThread, QObject):
 
         for z_level in range(self.num_z):
 
-            for row in range(self.num_rows):
-                row = self.num_rows - 1 - row if self.is_reversed['rows'] else row
+            for r in range(self.num_rows):
 
-                for col in range(self.num_cols):
-                    col = self.num_cols - 1 - col if self.is_reversed['cols'] else col
+                for c in range(self.num_cols):
+
+                    row = self.num_rows - 1 - r if self.is_reversed['rows'] else r
+                    col = self.num_cols - 1 - c if self.is_reversed['cols'] else c
+                    # print(f"row:{row}, col:{col}, z:{z_level}")
 
                     if self.use_registration and FULL_REGISTRATION and z_level == 0:
-                        if (row, col) in self.stitching_data[well][self.registration_channel][z_level]:
-                            tile_info = self.stitching_data[well][self.registration_channel][z_level][(row, col)]
-                            self.h_shift, self.v_shift = self.calculate_dynamic_shifts(well, self.registration_channel, z_level, row, col)
+                        if (r, c) in self.stitching_data[well][self.registration_channel][z_level]:
+                            self.h_shift, self.v_shift = self.calculate_dynamic_shifts(well, self.registration_channel, z_level, r, c)
 
                     # Now apply the same shifts to all channels
                     for channel in self.channel_names:
-                        if (row, col) in self.stitching_data[well][channel][z_level]:
-                            tile_info = self.stitching_data[well][channel][z_level][(row, col)]
+                        if (r, c) in self.stitching_data[well][channel][z_level]:
+                            tile_info = self.stitching_data[well][channel][z_level][(r, c)]
+                            print(tile_info['filepath'])
                             tile = dask_imread(tile_info['filepath'])[0]
                             #tile = tile[:, ::-1]
                             if self.is_rgb[channel]:
