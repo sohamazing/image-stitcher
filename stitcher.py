@@ -25,7 +25,7 @@ from basicpy import BaSiC
 
 #from control._def import *
 STITCH_COMPLETE_ACQUISITION = True # stitch together wells and timepoints 
-FULL_REGISTRATION = False # dynamic registartion
+DYNAMIC_REGISTRATION = True # dynamic registartion
 IS_HCS = True
 REVERSE_ROWS = True
 CHANNEL_COLORS_MAP = {
@@ -336,18 +336,19 @@ class Stitcher(QThread, QObject):
         obj_tube_lens_mm = self.acquisition_params['objective']['tube_lens_f_mm']
         sensor_pixel_size_um = self.acquisition_params['sensor_pixel_size_um']
         tube_lens_mm = self.acquisition_params['tube_lens_mm']
+        pixel_binning = self.acquisition_params['pixel_binning']
 
         obj_focal_length_mm = obj_tube_lens_mm / obj_mag
         actual_mag = tube_lens_mm / obj_focal_length_mm
-        pixel_size_um = sensor_pixel_size_um / actual_mag
+        pixel_size_um = sensor_pixel_size_um / actual_mag * pixel_binning
         print("pixel_size_um:", pixel_size_um)
 
         dx_pixels = dx_mm * 1000 / pixel_size_um
         dy_pixels = dy_mm * 1000 / pixel_size_um
         print("dy_pixels", dy_pixels, ", dx_pixels:", dx_pixels)
 
-        self.max_x_overlap = round(abs(self.input_width - dx_pixels) / 2)
-        self.max_y_overlap = round(abs(self.input_height - dy_pixels) / 2)
+        self.max_x_overlap = round(abs(self.input_width - dx_pixels) * 1.05)
+        self.max_y_overlap = round(abs(self.input_height - dy_pixels) * 1.05)
         print("objective calculated - vertical overlap:", self.max_y_overlap, ", horizontal overlap:", self.max_x_overlap)
 
         col_left, col_right = (self.num_cols - 1) // 2, (self.num_cols - 1) // 2 + 1
@@ -385,6 +386,7 @@ class Stitcher(QThread, QObject):
 
     def calculate_dynamic_shifts(self, well, channel, z_level, row, col):
         h_shift, v_shift = self.h_shift, self.v_shift
+        dynamic_threshold = 0.05
 
         if self.is_reversed['rows']:
             curr_row = self.num_rows - 1 - row
@@ -408,11 +410,13 @@ class Stitcher(QThread, QObject):
 
             # Calculate horizontal shift
             new_h_shift = self.calculate_horizontal_shift(left_tile_path, current_tile_path, abs(self.h_shift[1]))
+            print("h_shift old, new:", h_shift, new_h_shift)
 
-            # Check if the new horizontal shift is within 10% of the precomputed shift
-            if self.h_shift == (0,0) or (0.95 * abs(self.h_shift[1]) <= abs(new_h_shift[1]) <= 1.05 * abs(self.h_shift[1]) and
-                0.95 * abs(self.h_shift[0]) <= abs(new_h_shift[0]) <= 1.05 * abs(self.h_shift[0])):
-                print("new h shift", new_h_shift, h_shift)
+            # Check if the original shift is (0,0) or if the new shift is within the dynamic threshold of the original
+            if (self.h_shift == (0, 0) or
+                ((1 - dynamic_threshold) * abs(self.h_shift[0]) <= abs(new_h_shift[0]) <= (1 + dynamic_threshold) * abs(self.h_shift[0]) and
+                 (1 - dynamic_threshold) * abs(self.h_shift[1]) <= abs(new_h_shift[1]) <= (1 + dynamic_threshold) * abs(self.h_shift[1]))):
+                print("using new h shift:", new_h_shift)
                 h_shift = new_h_shift
 
         # Check for top neighbor
@@ -421,11 +425,13 @@ class Stitcher(QThread, QObject):
 
             # Calculate vertical shift
             new_v_shift = self.calculate_vertical_shift(top_tile_path, current_tile_path, abs(self.v_shift[0]))
+            print("v_shift old, new:", v_shift, new_v_shift)
 
-            # Check if the new vertical shift is within 10% of the precomputed shift
-            if self.v_shift == (0,0) or (0.95 * abs(self.v_shift[0]) <= abs(new_v_shift[0]) <= 1.05 * abs(self.v_shift[0]) and
-                0.95 * abs(self.v_shift[1]) <= abs(new_v_shift[1]) <= 1.05 * abs(self.v_shift[1])):
-                print("new v shift", new_v_shift, v_shift)
+            # Check if the original shift is (0,0) or if the new shift is within the dynamic threshold of the original
+            if (self.v_shift == (0, 0) or
+                ((1 - dynamic_threshold) * abs(self.v_shift[0]) <= abs(new_v_shift[0]) <= (1 + dynamic_threshold) * abs(self.v_shift[0]) and
+                 (1 - dynamic_threshold) * abs(self.v_shift[1]) <= abs(new_v_shift[1]) <= (1 + dynamic_threshold) * abs(self.v_shift[1]))):
+                print("using new v shift:", new_v_shift)
                 v_shift = new_v_shift
 
         return h_shift, v_shift
@@ -439,9 +445,9 @@ class Stitcher(QThread, QObject):
                 abs((self.num_rows - 1) * self.v_shift[1])) # horizontal shift from vertical registration
         y_max = (self.input_height + ((self.num_rows - 1) * (self.input_height + self.v_shift[0])) + # vertical height with overlap
                 abs((self.num_cols - 1) * self.h_shift[0])) # vertical shift from horizontal registration
-        if self.use_registration and FULL_REGISTRATION:
-            y_max *= 1.05
-            x_max *= 1.05
+        if self.use_registration and DYNAMIC_REGISTRATION:
+            y_max = round(y_max * 1.05)
+            x_max = round(x_max * 1.05)
         size = max(y_max, x_max)
         num_levels = 1
         while size > 2000:
@@ -468,7 +474,8 @@ class Stitcher(QThread, QObject):
                     col = self.num_cols - 1 - c if self.is_reversed['cols'] else c
                     # print(f"row:{row}, col:{col}, z:{z_level}")
 
-                    if self.use_registration and FULL_REGISTRATION and z_level == 0:
+                    if self.use_registration and DYNAMIC_REGISTRATION and z_level == 0:
+                        print("calculate dynamic shifts", r, c)
                         if (r, c) in self.stitching_data[well][self.registration_channel][z_level]:
                             self.h_shift, self.v_shift = self.calculate_dynamic_shifts(well, self.registration_channel, z_level, r, c)
 
