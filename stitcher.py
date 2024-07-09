@@ -148,7 +148,7 @@ class Stitcher(QThread, QObject):
             self.is_wellplate = False
 
         i_rev = not coordinates.sort_values(by='i')['y (mm)'].is_monotonic_increasing
-        i_rev = not i_rev if REVERSE_ROWS else not i_rev
+        i_rev = not i_rev if REVERSE_ROWS else i_rev
         j_rev = not coordinates.sort_values(by='j')['x (mm)'].is_monotonic_increasing
         k_rev = not coordinates.sort_values(by='k')['z (um)'].is_monotonic_increasing
         return {'rows': i_rev, 'cols': j_rev, 'z-planes': k_rev}
@@ -476,7 +476,6 @@ class Stitcher(QThread, QObject):
                     for channel in self.channel_names:
                         if (r, c) in self.stitching_data[well][channel][z_level]:
                             tile_info = self.stitching_data[well][channel][z_level][(r, c)]
-                            print(tile_info['filepath'])
                             tile = dask_imread(tile_info['filepath'])[0]
                             #tile = tile[:, ::-1]
                             if self.is_rgb[channel]:
