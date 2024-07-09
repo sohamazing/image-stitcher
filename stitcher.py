@@ -336,7 +336,7 @@ class Stitcher(QThread, QObject):
         obj_tube_lens_mm = self.acquisition_params['objective']['tube_lens_f_mm']
         sensor_pixel_size_um = self.acquisition_params['sensor_pixel_size_um']
         tube_lens_mm = self.acquisition_params['tube_lens_mm']
-        pixel_binning = self.acquisition_params['pixel_binning']
+        pixel_binning = self.acquisition_params.get('pixel_binning', 1)
 
         obj_focal_length_mm = obj_tube_lens_mm / obj_mag
         actual_mag = tube_lens_mm / obj_focal_length_mm
