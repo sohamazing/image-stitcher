@@ -25,9 +25,9 @@ from basicpy import BaSiC
 
 #from control._def import *
 STITCH_COMPLETE_ACQUISITION = True # stitch together wells and timepoints 
-DYNAMIC_REGISTRATION = True # dynamic registartion
+DYNAMIC_REGISTRATION = False # dynamic registartion
 IS_HCS = True
-REVERSE_ROWS = True
+REVERSE_ROWS = False
 CHANNEL_COLORS_MAP = {
     '405':      {'hex': 0x3300FF, 'name': 'blue'},
     '488':      {'hex': 0x1FFF00, 'name': 'green'},
@@ -53,6 +53,7 @@ class Stitcher(QThread, QObject):
         QObject.__init__(self)
         self.input_folder = input_folder
         self.image_folder = None
+        self.output_folder = input_folder + "_stitched"
         self.output_name = output_name + output_format
         self.apply_flatfield = apply_flatfield
         self.use_registration = use_registration
@@ -138,6 +139,7 @@ class Stitcher(QThread, QObject):
         # return {'rows': self.acquisition_params.get("row direction", False),
         #         'cols': self.acquisition_params.get("col direction", False),
         #         'z-planes': False}
+        
         coordinates = pd.read_csv(os.path.join(input_folder, self.time_points[0], 'coordinates.csv'))
         try:
             first_well = coordinates['well'].unique()[0]
@@ -287,7 +289,7 @@ class Stitcher(QThread, QObject):
             combined_image = np.hstack((img1, img2))
         else:
             combined_image = np.vstack((img1, img2))
-        cv2.imwrite(f"{self.input_folder}/{title}.png", combined_image)
+        cv2.imwrite(f"{self.output_folder}/{title}.png", combined_image)
 
     def calculate_horizontal_shift(self, img1_path, img2_path, max_overlap, margin_ratio=0.2):
         try:
@@ -437,9 +439,9 @@ class Stitcher(QThread, QObject):
         return h_shift, v_shift
 
     def init_output(self, time_point, well):
-        output_folder = os.path.join(self.input_folder, f"{time_point}_stitched")
-        os.makedirs(output_folder, exist_ok=True)
-        self.output_path = os.path.join(output_folder, f"{well}_{self.output_name}" if self.is_wellplate else self.output_name)
+        stitched_folder = os.path.join(self.output_folder, f"{time_point}_stitched")
+        os.makedirs(stitched_folder, exist_ok=True)
+        self.output_path = os.path.join(stitched_folder, f"{well}_{self.output_name}" if self.is_wellplate else self.output_name)
 
         x_max = (self.input_width + ((self.num_cols - 1) * (self.input_width + self.h_shift[1])) + # horizontal width with overlap
                 abs((self.num_rows - 1) * self.v_shift[1])) # horizontal shift from vertical registration
@@ -585,9 +587,9 @@ class Stitcher(QThread, QObject):
 
     def create_complete_ome_zarr(self):
         """ Creates a complete OME-ZARR with proper channel metadata. """
-        final_path = os.path.join(self.input_folder, self.output_name.replace(".ome.zarr","") + "_complete_acquisition.ome.zarr")
+        final_path = os.path.join(self.output_folder, self.output_name.replace(".ome.zarr","") + "_complete_acquisition.ome.zarr")
         if len(self.time_points) == 1:
-            zarr_path = os.path.join(self.input_folder, f"0_stitched", self.output_name)
+            zarr_path = os.path.join(self.output_folder, f"0_stitched", self.output_name)
             #final_path = zarr_path
             shutil.copytree(zarr_path, final_path)
         else:
@@ -622,9 +624,9 @@ class Stitcher(QThread, QObject):
 
     def create_hcs_ome_zarr(self):
         """Creates a hierarchical Zarr file in the HCS OME-ZARR format for visualization in napari."""
-        hcs_path = os.path.join(self.input_folder, self.output_name.replace(".ome.zarr","") + "_complete_acquisition.ome.zarr")
+        hcs_path = os.path.join(self.output_folder, self.output_name.replace(".ome.zarr","") + "_complete_acquisition.ome.zarr")
         if len(self.time_points) == 1 and len(self.wells) == 1:
-            stitched_zarr_path = os.path.join(self.input_folder, f"0_stitched", f"{self.wells[0]}_{self.output_name}")
+            stitched_zarr_path = os.path.join(self.output_folder, f"0_stitched", f"{self.wells[0]}_{self.output_name}")
             #hcs_path = stitched_zarr_path # replace next line with this if no copy wanted
             shutil.copytree(stitched_zarr_path, hcs_path)
         else:
@@ -698,7 +700,7 @@ class Stitcher(QThread, QObject):
                 filepath = f"{well_id}_{self.output_name}"
             else:
                 filepath = f"{self.output_name}"
-            zarr_path = os.path.join(self.input_folder, f"{t}_stitched", filepath)
+            zarr_path = os.path.join(self.output_folder, f"{t}_stitched", filepath)
             print(f"t:{t} well:{well_id}, \t{zarr_path}")
             z = zarr.open(zarr_path, mode='r')
             # Ensure that '0' contains the data and it matches expected dimensions
