@@ -349,8 +349,8 @@ class Stitcher(QThread, QObject):
         dy_pixels = dy_mm * 1000 / pixel_size_um
         print("dy_pixels", dy_pixels, ", dx_pixels:", dx_pixels)
 
-        self.max_x_overlap = round(abs(self.input_width - dx_pixels) * 1.05)
-        self.max_y_overlap = round(abs(self.input_height - dy_pixels) * 1.05)
+        self.max_x_overlap = round(abs(self.input_width - dx_pixels) * 1.05 / 2)
+        self.max_y_overlap = round(abs(self.input_height - dy_pixels) * 1.05 / 2)
         print("objective calculated - vertical overlap:", self.max_y_overlap, ", horizontal overlap:", self.max_x_overlap)
 
         col_left, col_right = (self.num_cols - 1) // 2, (self.num_cols - 1) // 2 + 1

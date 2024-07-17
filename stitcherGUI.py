@@ -1,3 +1,4 @@
+import os
 import sys
 import napari
 import numpy as np
@@ -56,10 +57,10 @@ class StitchingGUI(QWidget):
         self.layout.addWidget(self.outputFormatCombo)
 
         # Output name entry
-        self.outputNameLabel = QLabel('Enter Experiment Name', self)
-        self.outputNameEdit = QLineEdit(self)
-        self.layout.addWidget(self.outputNameLabel)
-        self.layout.addWidget(self.outputNameEdit)
+        # self.outputNameLabel = QLabel('Enter Output Name', self)
+        # self.outputNameEdit = QLineEdit(self)
+        # self.layout.addWidget(self.outputNameLabel)
+        # self.layout.addWidget(self.outputNameEdit)
 
         # Progress bar setup
         self.progressBar = QProgressBar(self)
@@ -141,18 +142,15 @@ class StitchingGUI(QWidget):
         
 
     def onStitchingStart(self):
-        self.statusLabel.setText('Status: Stitching...')
-        output_name = self.outputNameEdit.text().strip()
-        output_format = '.' + self.outputFormatCombo.currentText().lower().replace('-', '.')
-        use_registration = self.useRegistrationCheck.isChecked()
-        apply_flatfield = self.applyFlatfieldCheck.isChecked()
-
         if not self.inputDirectory:
             QMessageBox.warning(self, "Input Error", "Please select an input directory.")
             return
-        if not output_name:
-            QMessageBox.warning(self, "Input Error", "Please enter an output name.")
-            return
+        self.statusLabel.setText('Status: Stitching...')
+        # output_name = self.outputNameEdit.text().strip()
+        output_name = os.path.basename(self.inputDirectory)
+        output_format = '.' + self.outputFormatCombo.currentText().lower().replace('-', '.')
+        use_registration = self.useRegistrationCheck.isChecked()
+        apply_flatfield = self.applyFlatfieldCheck.isChecked()
         
         if use_registration:
             # Assuming z-level and channel are required for registration
@@ -176,7 +174,7 @@ class StitchingGUI(QWidget):
                 registration_z_level=z_level,
             )
             self.setupConnections()
-            self.outputPathEdit.setText(f"{self.inputDirectory}/{output_name}_complete_acquisition{output_format}")
+            #self.outputPathEdit.setText(f"{self.inputDirectory}_stitched/{output_name}_complete_acquisition{output_format}")
             self.stitcher.start()
             self.progressBar.show()
         except Exception as e:
