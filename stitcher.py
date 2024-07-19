@@ -16,6 +16,7 @@ import cv2
 import dask.array as da
 from dask_image.imread import imread as dask_imread
 from skimage.registration import phase_cross_correlation
+from skimage import exposure
 import ome_zarr
 import zarr
 from aicsimageio.writers import OmeTiffWriter
@@ -54,6 +55,7 @@ class Stitcher(QThread, QObject):
         self.input_folder = input_folder
         self.image_folder = None
         self.output_folder = input_folder + "_stitched"
+        os.makedirs(self.output_folder, exist_ok=True)
         self.output_name = output_name + output_format
         self.apply_flatfield = apply_flatfield
         self.use_registration = use_registration
@@ -281,6 +283,7 @@ class Stitcher(QThread, QObject):
     def normalize_image(self, img):
         img_min, img_max = img.min(), img.max()
         img_normalized = (img - img_min) / (img_max - img_min)
+        # img_normalized = exposure.equalize_hist(img_normalized) # optional to equalize hist... 
         scale_factor = np.iinfo(self.dtype).max if np.issubdtype(self.dtype, np.integer) else 1
         return (img_normalized * scale_factor).astype(self.dtype)
 
@@ -289,7 +292,7 @@ class Stitcher(QThread, QObject):
             combined_image = np.hstack((img1, img2))
         else:
             combined_image = np.vstack((img1, img2))
-        cv2.imwrite(f"{self.output_folder}/{title}.png", combined_image)
+        cv2.imwrite(os.path.join(self.output_folder, f"{title}.png"), combined_image)
 
     def calculate_horizontal_shift(self, img1_path, img2_path, max_overlap, margin_ratio=0.2):
         try:
@@ -349,8 +352,8 @@ class Stitcher(QThread, QObject):
         dy_pixels = dy_mm * 1000 / pixel_size_um
         print("dy_pixels", dy_pixels, ", dx_pixels:", dx_pixels)
 
-        self.max_x_overlap = round(abs(self.input_width - dx_pixels) * 1.05 / 2)
-        self.max_y_overlap = round(abs(self.input_height - dy_pixels) * 1.05 / 2)
+        self.max_x_overlap = round(abs(self.input_width - dx_pixels) * 1.05)
+        self.max_y_overlap = round(abs(self.input_height - dy_pixels) * 1.05)
         print("objective calculated - vertical overlap:", self.max_y_overlap, ", horizontal overlap:", self.max_x_overlap)
 
         col_left, col_right = (self.num_cols - 1) // 2, (self.num_cols - 1) // 2 + 1
@@ -412,13 +415,13 @@ class Stitcher(QThread, QObject):
 
             # Calculate horizontal shift
             new_h_shift = self.calculate_horizontal_shift(left_tile_path, current_tile_path, abs(self.h_shift[1]))
-            print("h_shift old, new:", h_shift, new_h_shift)
 
             # Check if the original shift is (0,0) or if the new shift is within the dynamic threshold of the original
             if (self.h_shift == (0, 0) or
                 ((1 - dynamic_threshold) * abs(self.h_shift[0]) <= abs(new_h_shift[0]) <= (1 + dynamic_threshold) * abs(self.h_shift[0]) and
                  (1 - dynamic_threshold) * abs(self.h_shift[1]) <= abs(new_h_shift[1]) <= (1 + dynamic_threshold) * abs(self.h_shift[1]))):
-                print("using new h shift:", new_h_shift)
+                print("using new h shift")
+                print("h_shift old, new:", h_shift, new_h_shift)
                 h_shift = new_h_shift
 
         # Check for top neighbor
@@ -427,13 +430,13 @@ class Stitcher(QThread, QObject):
 
             # Calculate vertical shift
             new_v_shift = self.calculate_vertical_shift(top_tile_path, current_tile_path, abs(self.v_shift[0]))
-            print("v_shift old, new:", v_shift, new_v_shift)
 
             # Check if the original shift is (0,0) or if the new shift is within the dynamic threshold of the original
             if (self.v_shift == (0, 0) or
                 ((1 - dynamic_threshold) * abs(self.v_shift[0]) <= abs(new_v_shift[0]) <= (1 + dynamic_threshold) * abs(self.v_shift[0]) and
                  (1 - dynamic_threshold) * abs(self.v_shift[1]) <= abs(new_v_shift[1]) <= (1 + dynamic_threshold) * abs(self.v_shift[1]))):
-                print("using new v shift:", new_v_shift)
+                print("using new v shift")
+                print("v_shift old, new:", v_shift, new_v_shift)
                 v_shift = new_v_shift
 
         return h_shift, v_shift
