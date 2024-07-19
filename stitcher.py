@@ -28,7 +28,7 @@ from basicpy import BaSiC
 STITCH_COMPLETE_ACQUISITION = True # stitch together wells and timepoints 
 DYNAMIC_REGISTRATION = False # dynamic registartion
 IS_HCS = True
-REVERSE_ROWS = False
+
 CHANNEL_COLORS_MAP = {
     '405':      {'hex': 0x3300FF, 'name': 'blue'},
     '488':      {'hex': 0x1FFF00, 'name': 'green'},
