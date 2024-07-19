@@ -138,10 +138,6 @@ class Stitcher(QThread, QObject):
         return None
 
     def determine_directions(self, input_folder):
-        # return {'rows': self.acquisition_params.get("row direction", False),
-        #         'cols': self.acquisition_params.get("col direction", False),
-        #         'z-planes': False}
-        
         coordinates = pd.read_csv(os.path.join(input_folder, self.time_points[0], 'coordinates.csv'))
         try:
             first_well = coordinates['well'].unique()[0]
@@ -152,9 +148,13 @@ class Stitcher(QThread, QObject):
             self.is_wellplate = False
 
         i_rev = not coordinates.sort_values(by='i')['y (mm)'].is_monotonic_increasing
-        i_rev = not i_rev if REVERSE_ROWS else i_rev
         j_rev = not coordinates.sort_values(by='j')['x (mm)'].is_monotonic_increasing
         k_rev = not coordinates.sort_values(by='k')['z (um)'].is_monotonic_increasing
+
+        i_rev =  self.acquisition_params.get("row direction", i_rev)
+        j_rev =  self.acquisition_params.get("col direction", j_rev)
+        k_rev =  self.acquisition_params.get("z direction", k_rev)
+
         return {'rows': i_rev, 'cols': j_rev, 'z-planes': k_rev}
 
     def parse_filenames(self, time_point):
