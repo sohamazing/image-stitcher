@@ -2,10 +2,10 @@ import os
 import sys
 import napari
 import numpy as np
-from PyQt5.QtWidgets import (QApplication, QWidget, QVBoxLayout, QPushButton, QLabel, QProgressBar, QComboBox, QMessageBox, QCheckBox, QSpinBox, QLineEdit, QFileDialog)
-from PyQt5.QtCore import QObject, pyqtSignal
+from PyQt5.QtWidgets import (QApplication, QWidget, QGridLayout, QHBoxLayout, QVBoxLayout, QPushButton, QLabel, QProgressBar, QComboBox, QMessageBox, QCheckBox, QSpinBox, QLineEdit, QFileDialog)
+from PyQt5.QtCore import QObject, pyqtSignal, Qt
 from napari.utils.colormaps import Colormap, AVAILABLE_COLORMAPS
-from stitcher import Stitcher, CHANNEL_COLORS_MAP
+from stitcher_V3 import Stitcher, CoordinateStitcher, CHANNEL_COLORS_MAP
 
 class StitchingGUI(QWidget):
     def __init__(self):
@@ -19,53 +19,58 @@ class StitchingGUI(QWidget):
     def initUI(self):
         self.layout = QVBoxLayout(self)
 
-        # Input Directory Selection
+        # Input Directory Selection (full width at the top)
         self.inputDirectoryBtn = QPushButton('Select Input Directory', self)
         self.inputDirectoryBtn.clicked.connect(self.selectInputDirectory)
         self.layout.addWidget(self.inputDirectoryBtn)
 
-        # Checkbox for applying flatfield correction
-        self.applyFlatfieldCheck = QCheckBox("Apply Flatfield Correction", self)
-        self.layout.addWidget(self.applyFlatfieldCheck)
+        # Create a horizontal layout for checkboxes and registration inputs
+        hbox = QHBoxLayout()
 
-        # Checkbox for enabling registration
+        # Left side: Checkboxes
+        grid = QGridLayout()
+        self.coordinateAcquisitionCheck = QCheckBox('Coordinate Acquisition', self)
+        self.coordinateAcquisitionCheck.toggled.connect(self.onCoordinateAcquisition)
+        grid.addWidget(self.coordinateAcquisitionCheck, 0, 0)
+
+        self.applyFlatfieldCheck = QCheckBox("Apply Flatfield Correction", self)
+        grid.addWidget(self.applyFlatfieldCheck, 1, 0)
+
         self.useRegistrationCheck = QCheckBox('Use Registration', self)
         self.useRegistrationCheck.toggled.connect(self.onRegistrationCheck)
-        self.layout.addWidget(self.useRegistrationCheck)
+        grid.addWidget(self.useRegistrationCheck, 2, 0)
 
-        # Spin box for selecting Z-Level if registration is used
-        self.zLevelLabel = QLabel('Enter Registration Z-Level', self)
+        # Right side: Registration inputs
+        self.channelLabel = QLabel('Registration Channel', self)
+        self.channelLabel.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        self.channelCombo = QComboBox(self)
+        grid.addWidget(self.channelLabel, 0, 2)
+        grid.addWidget(self.channelCombo, 0, 3)
+
+        self.zLevelLabel = QLabel('Registration Z-Level', self)
+        self.zLevelLabel.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
         self.zLevelInput = QSpinBox(self)
         self.zLevelInput.setMinimum(0)
-        self.zLevelInput.setMaximum(100)  # Adjust max as necessary based on your application
-        self.zLevelLabel.hide()
-        self.zLevelInput.hide()  # Initially hidden
-        self.layout.addWidget(self.zLevelLabel)
-        self.layout.addWidget(self.zLevelInput)
+        self.zLevelInput.setMaximum(100)
+        grid.addWidget(self.zLevelLabel, 1, 2)
+        grid.addWidget(self.zLevelInput, 1, 3)
 
-        # Combo box for selecting channel for registration if used
-        self.channelLabel = QLabel('Enter Registration Channel', self)
-        self.channelCombo = QComboBox(self)
-        self.channelLabel.hide()
-        self.channelCombo.hide()  # Initially hidden
-        self.layout.addWidget(self.channelLabel)
-        self.layout.addWidget(self.channelCombo)
+        self.overlapPercentLabel = QLabel('Overlap Percent', self)
+        self.overlapPercentLabel.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        self.overlapPercentInput = QSpinBox(self)
+        self.overlapPercentInput.setMinimum(0)
+        self.overlapPercentInput.setMaximum(100)
+        self.overlapPercentInput.setSuffix(' %')
+        grid.addWidget(self.overlapPercentLabel, 2, 2)
+        grid.addWidget(self.overlapPercentInput, 2, 3)    
+        #grid.setColumnStretch(1,1)
 
-        # Output format combo box with OME-ZARR as the first option
+        self.layout.addLayout(grid)
+
+        # Output format combo box (full width)
         self.outputFormatCombo = QComboBox()
         self.outputFormatCombo.addItems(['OME-ZARR', 'OME-TIFF'])
         self.layout.addWidget(self.outputFormatCombo)
-
-        # Output name entry
-        # self.outputNameLabel = QLabel('Enter Output Name', self)
-        # self.outputNameEdit = QLineEdit(self)
-        # self.layout.addWidget(self.outputNameLabel)
-        # self.layout.addWidget(self.outputNameEdit)
-
-        # Progress bar setup
-        self.progressBar = QProgressBar(self)
-        self.progressBar.hide()
-        self.layout.addWidget(self.progressBar)
 
         # Status label
         self.statusLabel = QLabel('Status: Ready', self)
@@ -75,6 +80,11 @@ class StitchingGUI(QWidget):
         self.startBtn = QPushButton('Start Stitching', self)
         self.startBtn.clicked.connect(self.onStitchingStart)
         self.layout.addWidget(self.startBtn)
+
+        # Progress bar setup
+        self.progressBar = QProgressBar(self)
+        self.progressBar.hide()
+        self.layout.addWidget(self.progressBar)
 
         # Output path QLineEdit
         self.outputPathEdit = QLineEdit(self)
@@ -88,8 +98,16 @@ class StitchingGUI(QWidget):
         self.layout.addWidget(self.viewBtn)
 
         self.setWindowTitle('Cephla Image Stitcher')
-        self.setGeometry(300, 300, 500, 200)
+        self.setGeometry(300, 300, 500, 300)
         self.show()
+
+        # Initially hide registration inputs
+        self.zLevelLabel.hide()
+        self.zLevelInput.hide()
+        self.overlapPercentLabel.hide()
+        self.overlapPercentInput.hide()
+        self.channelLabel.hide()
+        self.channelCombo.hide()
 
     def selectInputDirectory(self):
         self.inputDirectory = QFileDialog.getExistingDirectory(self, "Select Input Image Folder")
@@ -98,6 +116,13 @@ class StitchingGUI(QWidget):
             self.onRegistrationCheck(self.useRegistrationCheck.isChecked())
 
     def onRegistrationCheck(self, checked):
+        self.zLevelLabel.setVisible(checked)
+        self.zLevelInput.setVisible(checked)
+        self.overlapPercentLabel.setVisible(checked)
+        self.overlapPercentInput.setVisible(checked)
+        self.channelLabel.setVisible(checked)
+        self.channelCombo.setVisible(checked)
+
         if checked:
             if not self.inputDirectory:
                 QMessageBox.warning(self, "Input Error", "Please Select an Input Image Folder First")
@@ -106,27 +131,31 @@ class StitchingGUI(QWidget):
 
             try:
                 # Create temporary Stitcher to parse filenames
-                stitcher = Stitcher(input_folder=self.inputDirectory)
-                timepoints = stitcher.get_time_points(input_folder=self.inputDirectory)
+                if self.coordinateAcquisitionCheck.isChecked():
+                    stitcher = CoordinateStitcher(input_folder=self.inputDirectory)
+                    timepoints = stitcher.get_time_points()
+                else:
+                    stitcher = Stitcher(input_folder=self.inputDirectory)
+                    timepoints = stitcher.get_time_points(input_folder=self.inputDirectory)
                 
                 if not timepoints:
                     QMessageBox.warning(self, "Input Error", "No time points found in the selected directory.")
                     self.useRegistrationCheck.setChecked(False)
                     return
 
-                stitcher.parse_filenames(time_point=timepoints[0])
+                if self.coordinateAcquisitionCheck.isChecked():
+                    stitcher.parse_filenames()
+                else:
+                    stitcher.parse_filenames(time_point=timepoints[0])
 
                 # Setup Z-Level
-                self.zLevelLabel.show()
                 self.zLevelInput.setMinimum(0)
                 self.zLevelInput.setMaximum(stitcher.num_z - 1)
-                self.zLevelInput.show()
 
                 # Setup channel dropdown
-                self.channelLabel.show()
                 self.channelCombo.clear()
                 self.channelCombo.addItems(stitcher.channel_names)
-                self.channelCombo.show()
+
             except Exception as e:
                 QMessageBox.critical(self, "Parsing Error", f"An error occurred during data processing: {e}")
                 self.useRegistrationCheck.setChecked(False)
@@ -134,12 +163,18 @@ class StitchingGUI(QWidget):
                 self.zLevelInput.hide()
                 self.channelLabel.hide()
                 self.channelCombo.hide()
+                self.overlapPercentInput.hide()
+                self.overlapPercentLabel.hide()
         else:
             self.zLevelLabel.hide()
             self.zLevelInput.hide()
             self.channelLabel.hide()
             self.channelCombo.hide()
-        
+            self.overlapPercentInput.hide()
+            self.overlapPercentLabel.hide()
+
+    def onCoordinateAcquisition(self, checked):
+        pass
 
     def onStitchingStart(self):
         if not self.inputDirectory:
@@ -151,6 +186,8 @@ class StitchingGUI(QWidget):
         output_format = '.' + self.outputFormatCombo.currentText().lower().replace('-', '.')
         use_registration = self.useRegistrationCheck.isChecked()
         apply_flatfield = self.applyFlatfieldCheck.isChecked()
+        coordinate_acquisition = self.coordinateAcquisitionCheck.isChecked()
+        overlap_percent = self.overlapPercentInput.value()
         
         if use_registration:
             # Assuming z-level and channel are required for registration
@@ -164,15 +201,27 @@ class StitchingGUI(QWidget):
             channel = ''
 
         try:
-            self.stitcher = Stitcher(
-                input_folder=self.inputDirectory,
-                output_name=output_name,
-                output_format=output_format,
-                apply_flatfield=apply_flatfield,
-                use_registration=use_registration,
-                registration_channel=channel,
-                registration_z_level=z_level,
-            )
+            if coordinate_acquisition:
+                self.stitcher = CoordinateStitcher(
+                    input_folder=self.inputDirectory,
+                    output_name=output_name,
+                    output_format=output_format,
+                    apply_flatfield=apply_flatfield,
+                    use_registration=use_registration,
+                    registration_channel=channel,
+                    registration_z_level=z_level,
+                    overlap_percent=overlap_percent,
+                )
+            else:
+                self.stitcher = Stitcher(
+                    input_folder=self.inputDirectory,
+                    output_name=output_name,
+                    output_format=output_format,
+                    apply_flatfield=apply_flatfield,
+                    use_registration=use_registration,
+                    registration_channel=channel,
+                    registration_z_level=z_level,
+                )
             self.setupConnections()
             #self.outputPathEdit.setText(f"{self.inputDirectory}_stitched/{output_name}_complete_acquisition{output_format}")
             self.stitcher.start()
