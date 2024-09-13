@@ -49,7 +49,7 @@ class Stitcher(QThread, QObject):
     starting_saving = Signal(bool)
     finished_saving = Signal(str, object)
 
-    def __init__(self, input_folder, output_name='', output_format=".ome.zarr", apply_flatfield=0, use_registration=0, registration_channel='', registration_z_level=0):
+    def __init__(self, input_folder, output_name='', output_format=".ome.zarr", apply_flatfield=0, use_registration=0, registration_channel='', registration_z_level=0, overlap_percent=0):
         QThread.__init__(self)
         QObject.__init__(self)
         self.input_folder = input_folder
@@ -70,7 +70,7 @@ class Stitcher(QThread, QObject):
         print(self.is_reversed)
         self.is_wellplate = IS_HCS
         self.init_stitching_parameters()
-        # self.overlap_percent = Acquisition.OVERLAP_PERCENT
+        self.overlap_percent = overlap_percent
 
     def init_stitching_parameters(self):
         self.is_rgb = {}
@@ -356,6 +356,15 @@ class Stitcher(QThread, QObject):
         self.max_y_overlap = round(abs(self.input_height - dy_pixels) * 1.05)
         print("objective calculated - vertical overlap:", self.max_y_overlap, ", horizontal overlap:", self.max_x_overlap)
 
+        if self.overlap_percent != 0:
+            if self.max_x_overlap > 2 * self.overlap_percent / 100 * self.input_width:
+                self.max_x_overlap = round(self.overlap_percent / 100 * self.input_width * 1.05)
+                print("overlap calculated - horizontal overlap:", self.max_x_overlap)
+
+            if self.max_y_overlap > 2 * self.overlap_percent / 100 * self.input_height:
+                self.max_y_overlap = round(self.overlap_percent / 100 * self.input_height * 1.05)
+                print("overlap calculated - vertical overlap:", self.max_y_overlap)
+
         col_left, col_right = (self.num_cols - 1) // 2, (self.num_cols - 1) // 2 + 1
         if self.is_reversed['cols']:
             col_left, col_right = col_right, col_left
@@ -388,6 +397,7 @@ class Stitcher(QThread, QObject):
             if self.max_x_overlap > 0 and img2_path_horizontal and img1_path != img2_path_horizontal else (0, 0)
         )
         print("vertical shift:", self.v_shift, ", horizontal shift:", self.h_shift)
+
 
     def calculate_dynamic_shifts(self, well, channel, z_level, row, col):
         h_shift, v_shift = self.h_shift, self.v_shift

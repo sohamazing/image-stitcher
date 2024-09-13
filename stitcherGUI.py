@@ -5,7 +5,8 @@ import numpy as np
 from PyQt5.QtWidgets import (QApplication, QWidget, QGridLayout, QHBoxLayout, QVBoxLayout, QPushButton, QLabel, QProgressBar, QComboBox, QMessageBox, QCheckBox, QSpinBox, QLineEdit, QFileDialog)
 from PyQt5.QtCore import QObject, pyqtSignal, Qt
 from napari.utils.colormaps import Colormap, AVAILABLE_COLORMAPS
-from stitcher_V3 import Stitcher, CoordinateStitcher, CHANNEL_COLORS_MAP
+from stitcher_V3 import CoordinateStitcher, CHANNEL_COLORS_MAP, Stitcher 
+#from stitcher import Stitcher
 
 class StitchingGUI(QWidget):
     def __init__(self):
@@ -55,7 +56,7 @@ class StitchingGUI(QWidget):
         grid.addWidget(self.zLevelLabel, 1, 2)
         grid.addWidget(self.zLevelInput, 1, 3)
 
-        self.overlapPercentLabel = QLabel('Overlap Percent', self)
+        self.overlapPercentLabel = QLabel('Overlap Percent (Optional)', self)
         self.overlapPercentLabel.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
         self.overlapPercentInput = QSpinBox(self)
         self.overlapPercentInput.setMinimum(0)
@@ -221,6 +222,7 @@ class StitchingGUI(QWidget):
                     use_registration=use_registration,
                     registration_channel=channel,
                     registration_z_level=z_level,
+                    overlap_percent=overlap_percent
                 )
             self.setupConnections()
             #self.outputPathEdit.setText(f"{self.inputDirectory}_stitched/{output_name}_complete_acquisition{output_format}")
