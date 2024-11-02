@@ -1237,9 +1237,31 @@ class CoordinateStitcher(QThread, QObject):
             self.registration_channel = self.channel_names[0]
 
 
-        max_x_overlap = round(self.input_width * self.overlap_percent / 2 / 100)
-        max_y_overlap = round(self.input_height * self.overlap_percent / 2 / 100)
-        print(f"Expected shifts - Horizontal: {(0, -max_x_overlap)}, Vertical: {(-max_y_overlap , 0)}")
+        if self.overlap_percent != 0:
+            max_x_overlap = round(self.input_width * self.overlap_percent / 2 / 100)
+            max_y_overlap = round(self.input_height * self.overlap_percent / 2 / 100)
+            print(f"Expected shifts - Horizontal: {(0, -max_x_overlap)}, Vertical: {(-max_y_overlap , 0)}")
+
+        else: # Calculate estimated overlap from acquisition parameters
+            dx_mm = self.acquisition_params['dx(mm)']
+            dy_mm = self.acquisition_params['dy(mm)']
+            obj_mag = self.acquisition_params['objective']['magnification']
+            obj_tube_lens_mm = self.acquisition_params['objective']['tube_lens_f_mm']
+            sensor_pixel_size_um = self.acquisition_params['sensor_pixel_size_um']
+            tube_lens_mm = self.acquisition_params['tube_lens_mm']
+
+            obj_focal_length_mm = obj_tube_lens_mm / obj_mag
+            actual_mag = tube_lens_mm / obj_focal_length_mm
+            self.pixel_size_um = sensor_pixel_size_um / actual_mag
+            print("pixel_size_um:", self.pixel_size_um)
+
+            dx_pixels = dx_mm * 1000 / self.pixel_size_um
+            dy_pixels = dy_mm * 1000 / self.pixel_size_um
+            print("dy_pixels", dy_pixels, ", dx_pixels:", dx_pixels)
+
+            max_x_overlap = round(abs(self.input_width - dx_pixels) * 1.05)
+            max_y_overlap = round(abs(self.input_height - dy_pixels) * 1.05)
+            print("objective calculated - vertical overlap:", max_y_overlap, ", horizontal overlap:", max_x_overlap)
 
         # Find center positions
         center_x_index = (len(x_positions) - 1) // 2
