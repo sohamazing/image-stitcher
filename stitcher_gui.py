@@ -5,8 +5,9 @@ import numpy as np
 from PyQt5.QtWidgets import (QApplication, QWidget, QGridLayout, QHBoxLayout, QVBoxLayout, QPushButton, QLabel, QProgressBar, QComboBox, QMessageBox, QCheckBox, QSpinBox, QLineEdit, QFileDialog)
 from PyQt5.QtCore import QObject, pyqtSignal, Qt
 from napari.utils.colormaps import Colormap, AVAILABLE_COLORMAPS
-from CoordinateStitcher import CoordinateStitcher
-from stitcher import Stitcher, CHANNEL_COLORS_MAP
+from parameters import StitchingParameters
+from stitcher_V4 import CoordinateStitcher
+from stitcher import CHANNEL_COLORS_MAP, Stitcher 
 
 class StitchingGUI(QWidget):
     def __init__(self):
@@ -31,20 +32,24 @@ class StitchingGUI(QWidget):
         # Left side: Checkboxes
         grid = QGridLayout()
         self.coordinateAcquisitionCheck = QCheckBox('Coordinate Acquisition', self)
+        self.coordinateAcquisitionCheck.setChecked(True)  # Default to False
         self.coordinateAcquisitionCheck.toggled.connect(self.onCoordinateAcquisition)
         grid.addWidget(self.coordinateAcquisitionCheck, 0, 0)
 
         self.applyFlatfieldCheck = QCheckBox("Apply Flatfield Correction", self)
         grid.addWidget(self.applyFlatfieldCheck, 1, 0)
 
-        self.mergeTimepointsCheck = QCheckBox('Merge Timepoints', self)
-        self.mergeTimepointsCheck.setChecked(True)  # Default to True
-        grid.addWidget(self.mergeTimepointsCheck, 2, 0)
-
-
         self.useRegistrationCheck = QCheckBox('Use Registration', self)
         self.useRegistrationCheck.toggled.connect(self.onRegistrationCheck)
-        grid.addWidget(self.useRegistrationCheck, 3, 0)
+        grid.addWidget(self.useRegistrationCheck, 2, 0)
+
+        self.mergeTimepointsCheck = QCheckBox('Merge Timepoints', self) # MERGE_TIMEPOINTS
+        self.mergeTimepointsCheck.setChecked(False)  # Default to False
+        grid.addWidget(self.mergeTimepointsCheck, 3, 0)
+
+        self.mergeRegionsCheck = QCheckBox('Merge HCS Regions', self) # STITCH_COMPLETE_ACQUISITION
+        self.mergeRegionsCheck.setChecked(False)  # Default to False
+        grid.addWidget(self.mergeRegionsCheck, 4, 0)
 
         # Right side: Registration inputs
         self.channelLabel = QLabel('Registration Channel', self)
@@ -136,12 +141,18 @@ class StitchingGUI(QWidget):
                 return
 
             try:
+                # Create temporary params
+                temp_params = StitchingParameters(
+                    input_folder=self.inputDirectory,
+                    coordinate_based=self.coordinateAcquisitionCheck.isChecked()
+                )
+                
                 # Create temporary Stitcher to parse filenames
-                if self.coordinateAcquisitionCheck.isChecked():
-                    stitcher = CoordinateStitcher(input_folder=self.inputDirectory)
+                if temp_params.coordinate_based:
+                    stitcher = CoordinateStitcher(temp_params)
                     timepoints = stitcher.get_time_points()
                 else:
-                    stitcher = Stitcher(input_folder=self.inputDirectory)
+                    stitcher = Stitcher(temp_params)
                     timepoints = stitcher.get_time_points(input_folder=self.inputDirectory)
                 
                 if not timepoints:
@@ -149,8 +160,8 @@ class StitchingGUI(QWidget):
                     self.useRegistrationCheck.setChecked(False)
                     return
 
-                if self.coordinateAcquisitionCheck.isChecked():
-                    stitcher.parse_filenames()
+                if temp_params.coordinate_based:
+                    stitcher.parse_filenames(timepoints[0])
                 else:
                     stitcher.parse_filenames(time_point=timepoints[0])
 
@@ -183,57 +194,40 @@ class StitchingGUI(QWidget):
         pass
 
     def onStitchingStart(self):
+        """Start stitching from GUI."""
         if not self.inputDirectory:
             QMessageBox.warning(self, "Input Error", "Please select an input directory.")
             return
-        self.statusLabel.setText('Status: Stitching...')
-        # output_name = self.outputNameEdit.text().strip()
-        output_name = os.path.basename(self.inputDirectory)
-        output_format = '.' + self.outputFormatCombo.currentText().lower().replace('-', '.')
-        use_registration = self.useRegistrationCheck.isChecked()
-        apply_flatfield = self.applyFlatfieldCheck.isChecked()
-        coordinate_acquisition = self.coordinateAcquisitionCheck.isChecked()
-        overlap_percent = self.overlapPercentInput.value()
-        merge_timepoints = self.mergeTimepointsCheck.isChecked()
-        
-        if use_registration:
-            # Assuming z-level and channel are required for registration
-            z_level = self.zLevelInput.value()
-            channel = self.channelCombo.currentText()
-            if not channel:  # Add check to ensure a channel is selected
-                QMessageBox.warning(self, "Input Error", "Please select a registration channel.")
-                return
-        else:
-            z_level = 0
-            channel = ''
-
+            
         try:
-            if coordinate_acquisition:
-                self.stitcher = CoordinateStitcher(
-                    input_folder=self.inputDirectory,
-                    output_name=output_name,
-                    output_format=output_format,
-                    apply_flatfield=apply_flatfield,
-                    use_registration=use_registration,
-                    registration_channel=channel,
-                    registration_z_level=z_level,
-                    overlap_percent=overlap_percent,
-                )
-            else:
-                self.stitcher = Stitcher(
-                    input_folder=self.inputDirectory,
-                    output_name=output_name,
-                    output_format=output_format,
-                    apply_flatfield=apply_flatfield,
-                    use_registration=use_registration,
-                    registration_channel=channel,
-                    registration_z_level=z_level,
-                    overlap_percent=overlap_percent
-                )
+            # Extract base output name from directory
+            #output_name = os.path.basename(self.inputDirectory)
+            
+            # Create parameters from UI state
+            params = StitchingParameters(
+                input_folder=self.inputDirectory,
+                #output_name=output_name,
+                output_format='.' + self.outputFormatCombo.currentText().lower().replace('-', '.'),
+                apply_flatfield=self.applyFlatfieldCheck.isChecked(),
+                use_registration=self.useRegistrationCheck.isChecked(),
+                registration_channel=self.channelCombo.currentText() if self.useRegistrationCheck.isChecked() else '',
+                registration_z_level=self.zLevelInput.value() if self.useRegistrationCheck.isChecked() else 0,
+                overlap_percent=self.overlapPercentInput.value(),
+                coordinate_based=self.coordinateAcquisitionCheck.isChecked(),
+                scan_pattern='Unidirectional',
+                merge_timepoints=self.mergeTimepointsCheck.isChecked(),
+                merge_hcs_regions=self.mergeRegionsCheck.isChecked()
+            )
+            
+            # Create appropriate stitcher
+            self.stitcher = CoordinateStitcher(params) if params.coordinate_based else Stitcher(params)
             self.setupConnections()
-            #self.outputPathEdit.setText(f"{self.inputDirectory}_stitched/{output_name}_complete_acquisition{output_format}")
+            
+            # Start processing
+            self.statusLabel.setText('Status: Stitching...')
             self.stitcher.start()
             self.progressBar.show()
+            
         except Exception as e:
             QMessageBox.critical(self, "Stitching Error", str(e))
             self.statusLabel.setText('Status: Error Encountered')
