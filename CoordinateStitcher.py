@@ -270,7 +270,7 @@ class CoordinateStitcher(QThread, QObject):
 
     def init_output(self, region):
         width, height = self.calculate_output_dimensions(region)
-        self.output_shape = (self.num_t, self.num_c, self.num_z, height, width)
+        self.output_shape = (1, self.num_c, self.num_z, height, width)
         print(f"Output shape for region {region}: {self.output_shape}")
         return da.zeros(self.output_shape, dtype=self.dtype, chunks=self.chunks)
 
@@ -301,6 +301,9 @@ class CoordinateStitcher(QThread, QObject):
                 random.shuffle(time_images)
                 selected_tiles = time_images[:min(32, len(time_images))]
                 images.extend(selected_tiles)
+
+                if len(images) > 48:
+                    break
 
             if not images:
                 print(f"WARNING: No images found for channel {channel} across all timepoints")
@@ -347,13 +350,15 @@ class CoordinateStitcher(QThread, QObject):
 
 
         if self.overlap_percent != 0:
-            max_x_overlap = round(self.input_width * self.overlap_percent / 2 / 100)
-            max_y_overlap = round(self.input_height * self.overlap_percent / 2 / 100)
+            max_x_overlap = round(self.input_width * self.overlap_percent / 100 * 1.1)
+            max_y_overlap = round(self.input_height * self.overlap_percent / 100 * 1.1)
             print(f"Expected shifts - Horizontal: {(0, -max_x_overlap)}, Vertical: {(-max_y_overlap , 0)}")
 
         else: # Calculate estimated overlap from acquisition parameters
-            dx_mm = self.acquisition_params['dx(mm)']
-            dy_mm = self.acquisition_params['dy(mm)']
+            # dx_mm = self.acquisition_params['dx(mm)']
+            # dy_mm = self.acquisition_params['dy(mm)']
+            dx_mm = self.x_positions[1] - self.x_positions[0]
+            dy_mm = self.y_positions[1] - self.y_positions[0]
             obj_mag = self.acquisition_params['objective']['magnification']
             obj_tube_lens_mm = self.acquisition_params['objective']['tube_lens_f_mm']
             sensor_pixel_size_um = self.acquisition_params['sensor_pixel_size_um']
@@ -533,7 +538,7 @@ class CoordinateStitcher(QThread, QObject):
                 progress_callback(processed_tiles, total_tiles)
 
         self.starting_saving.emit(False)
-        if len(self.regions) > 1:
+        if len(self.regions) > 1 and STITCH_COMPLETE_ACQUISITION:
             self.save_region_to_hcs_ome_zarr(region, stitched_images)
         else:
             # self.save_as_ome_zarr(region, stitched_images)
@@ -850,27 +855,29 @@ class CoordinateStitcher(QThread, QObject):
             print(f"\nCalculating shifts for region {self.regions[0]}...")
             self.calculate_shifts(self.regions[0])
 
-        for region in self.regions:
-            wtime = time.time()
+        for t in self.time_points:
+            for region in self.regions:
+                wtime = time.time()
 
-            # if self.use_registration:
-            #     print(f"\nCalculating shifts for region {region}...")
-            #     self.calculate_shifts(region)
+                # if self.use_registration:
+                #     print(f"\nCalculating shifts for region {region}...")
+                #     self.calculate_shifts(region)
 
-            self.starting_stitching.emit()
-            print(f"\nstarting stitching for region {region}...")
-            self.stitch_and_save_region(region, progress_callback=self.update_progress.emit)
+                self.starting_stitching.emit()
+                print(f"\nstarting stitching for region {region}...")
+                self.stitch_and_save_region(region, progress_callback=self.update_progress.emit)
 
-            sttime = time.time()
-            print(f"time to stitch and save region {region}", time.time() - wtime)
-            print(f"...done with region:{region}")
+                sttime = time.time()
+                print(f"time to stitch and save region {region}", time.time() - wtime)
+                print(f"...done with region:{region}")
 
-        if self.output_format.endswith('.ome.tiff'):
-            self.create_ome_tiff(self.stitched_images)
-        else:
-            output_path = os.path.join(self.input_folder, self.output_name)
-            print(f"Data saved in OME-ZARR format at: {output_path}")
-            self.print_zarr_structure(output_path)
+                if self.output_format.endswith('.ome.tiff'):
+                    # self.create_ome_tiff(self.stitched_images)
+                    pass
+                else:
+                    output_path = os.path.join(self.input_folder, self.output_name)
+                    print(f"Data saved in OME-ZARR format at: {output_path}")
+                    self.print_zarr_structure(output_path)
 
         self.finished_saving.emit(os.path.join(self.input_folder, self.output_name), self.dtype)
         print("total time to stitch + save:", time.time() - stime)
@@ -934,7 +941,7 @@ class CoordinateStitcher(QThread, QObject):
 
     def compile_single_fov_data(self, fov_data):
         # Initialize a 5D array to hold all the data for this FOV
-        tcz_fov = np.zeros((self.num_t, self.num_c, self.num_z, self.input_height, self.input_width), dtype=self.dtype)
+        tcz_fov = np.zeros((1, self.num_c, self.num_z, self.input_height, self.input_width), dtype=self.dtype)
 
         for key, scan_info in fov_data.items():
             t, _, _, z_level, channel = key
