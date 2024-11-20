@@ -127,6 +127,7 @@ class StitchingGUI(QWidget):
             self.onRegistrationCheck(self.useRegistrationCheck.isChecked())
 
     def onRegistrationCheck(self, checked):
+        """Handle registration checkbox state change."""
         self.zLevelLabel.setVisible(checked)
         self.zLevelInput.setVisible(checked)
         self.overlapPercentLabel.setVisible(checked)
@@ -150,28 +151,28 @@ class StitchingGUI(QWidget):
                 # Create temporary Stitcher to parse filenames
                 if temp_params.coordinate_based:
                     stitcher = CoordinateStitcher(temp_params)
-                    timepoints = stitcher.get_time_points()
+                    timepoints = stitcher.get_timepoints()  # Changed from get_time_points()
+                    
+                    if not timepoints:
+                        QMessageBox.warning(self, "Input Error", "No time points found in the selected directory.")
+                        self.useRegistrationCheck.setChecked(False)
+                        return
+
+                    stitcher.parse_filenames()  # No timepoint parameter needed
+                    
+                    # Setup Z-Level
+                    self.zLevelInput.setMinimum(0)
+                    self.zLevelInput.setMaximum(stitcher.num_z - 1)
+
+                    # Setup channel dropdown
+                    self.channelCombo.clear()
+                    self.channelCombo.addItems(stitcher.channel_names)
+                    
                 else:
-                    stitcher = Stitcher(temp_params)
-                    timepoints = stitcher.get_time_points(input_folder=self.inputDirectory)
-                
-                if not timepoints:
-                    QMessageBox.warning(self, "Input Error", "No time points found in the selected directory.")
+                    QMessageBox.warning(self, "Feature Not Available", 
+                                      "Non-coordinate based stitching currently not supported")
                     self.useRegistrationCheck.setChecked(False)
                     return
-
-                if temp_params.coordinate_based:
-                    stitcher.parse_filenames(timepoints[0])
-                else:
-                    stitcher.parse_filenames(time_point=timepoints[0])
-
-                # Setup Z-Level
-                self.zLevelInput.setMinimum(0)
-                self.zLevelInput.setMaximum(stitcher.num_z - 1)
-
-                # Setup channel dropdown
-                self.channelCombo.clear()
-                self.channelCombo.addItems(stitcher.channel_names)
 
             except Exception as e:
                 QMessageBox.critical(self, "Parsing Error", f"An error occurred during data processing: {e}")
@@ -182,13 +183,6 @@ class StitchingGUI(QWidget):
                 self.channelCombo.hide()
                 self.overlapPercentInput.hide()
                 self.overlapPercentLabel.hide()
-        else:
-            self.zLevelLabel.hide()
-            self.zLevelInput.hide()
-            self.channelLabel.hide()
-            self.channelCombo.hide()
-            self.overlapPercentInput.hide()
-            self.overlapPercentLabel.hide()
 
     def onCoordinateAcquisition(self, checked):
         pass
@@ -200,13 +194,9 @@ class StitchingGUI(QWidget):
             return
             
         try:
-            # Extract base output name from directory
-            #output_name = os.path.basename(self.inputDirectory)
-            
             # Create parameters from UI state
             params = StitchingParameters(
                 input_folder=self.inputDirectory,
-                #output_name=output_name,
                 output_format='.' + self.outputFormatCombo.currentText().lower().replace('-', '.'),
                 apply_flatfield=self.applyFlatfieldCheck.isChecked(),
                 use_registration=self.useRegistrationCheck.isChecked(),
@@ -219,8 +209,13 @@ class StitchingGUI(QWidget):
                 merge_hcs_regions=self.mergeRegionsCheck.isChecked()
             )
             
-            # Create appropriate stitcher
-            self.stitcher = CoordinateStitcher(params) if params.coordinate_based else Stitcher(params)
+            # Only use CoordinateStitcher for now
+            if not params.coordinate_based:
+                QMessageBox.warning(self, "Feature Not Available", 
+                                  "Non-coordinate based stitching currently not supported")
+                return
+                
+            self.stitcher = CoordinateStitcher(params)
             self.setupConnections()
             
             # Start processing
