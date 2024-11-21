@@ -95,24 +95,22 @@ class CoordinateStitcher(QThread):
             self.dynamic_registration = params.dynamic_registration
         
         # Initialize state
-        self.coordinates_df = None
-        self.pixel_size_um = None
-        self.acquisition_params = None
-        self.timepoints = []
-        self.regions = []
         self.scan_pattern = params.scan_pattern
         self.init_stitching_parameters()
 
     def init_stitching_parameters(self):
-        self.is_rgb = {}
+        self.pixel_size_um = None
+        self.acquisition_params = None
+        self.timepoints = []
+        self.regions = []
         self.channel_names = []
-        self.mono_channel_names = []
-        self.channel_colors = []
+        self.monochrome_channels = []
+        self.monochrome_colors = []
         self.num_z = self.num_c = self.num_t = 1
         self.input_height = self.input_width = 0
         self.num_pyramid_levels = 5
         self.flatfields = {}
-        self.stitching_data = {}
+        self.acquisition_metadata = {}
         self.dtype = np.uint16
         self.chunks = None
         self.h_shift = (0, 0)
@@ -133,7 +131,7 @@ class CoordinateStitcher(QThread):
         with open(acquistion_params_path, 'r') as file:
             self.acquisition_params = json.load(file)
 
-    def get_pixel_size_from_params(self):
+    def get_pixel_size(self):
         obj_mag = self.acquisition_params['objective']['magnification']
         obj_tube_lens_mm = self.acquisition_params['objective']['tube_lens_f_mm']
         sensor_pixel_size_um = self.acquisition_params['sensor_pixel_size_um']
@@ -145,15 +143,12 @@ class CoordinateStitcher(QThread):
         print("pixel_size_um:", self.pixel_size_um)
 
     
-    def parse_filenames(self):
+    def parse_acquisition_metadata(self):
         """
         Parses image filenames and matches them to coordinates for stitching.
         multiple channels, regions, timepoints, z levels
         """
-        self.extract_acquisition_parameters()
-        self.get_pixel_size_from_params()
-
-        self.stitching_data = {}
+        self.acquisition_metadata = {}
         self.regions = set()
         self.channel_names = set()
         max_z = 0
@@ -196,7 +191,7 @@ class CoordinateStitcher(QThread):
                 # Create key with actual timepoint value
                 key = (int(timepoint), region, fov, z_level, channel)  # Convert timepoint to int
                 
-                self.stitching_data[key] = {
+                self.acquisition_metadata[key] = {
                     'filepath': os.path.join(image_folder, file),
                     'x': coord_row['x (mm)'],
                     'y': coord_row['y (mm)'],
@@ -226,12 +221,12 @@ class CoordinateStitcher(QThread):
         self.num_fovs_per_region = max_fov + 1
         
         # Set up image parameters based on the first image
-        first_key = list(self.stitching_data.keys())[0]
-        first_timepoint = self.stitching_data[first_key]['t']
-        first_region = self.stitching_data[first_key]['region']
-        first_fov = self.stitching_data[first_key]['fov_idx']
-        first_z_level = self.stitching_data[first_key]['z_level']
-        first_image = dask_imread(self.stitching_data[first_key]['filepath'])[0]
+        first_key = list(self.acquisition_metadata.keys())[0]
+        first_timepoint = self.acquisition_metadata[first_key]['t']
+        first_region = self.acquisition_metadata[first_key]['region']
+        first_fov = self.acquisition_metadata[first_key]['fov_idx']
+        first_z_level = self.acquisition_metadata[first_key]['z_level']
+        first_image = dask_imread(self.acquisition_metadata[first_key]['filepath'])[0]
 
         self.dtype = first_image.dtype
         if len(first_image.shape) == 2:
@@ -243,47 +238,44 @@ class CoordinateStitcher(QThread):
         self.chunks = (1, 1, 1, 512, 512)
             
         # Set up final monochrome channels
-        self.mono_channel_names = []
+        self.monochrome_channels = []
         for channel in self.channel_names:
             channel_key = (first_timepoint, first_region, first_fov, first_z_level, channel)
-            channel_image = dask_imread(self.stitching_data[channel_key]['filepath'])[0]
+            channel_image = dask_imread(self.acquisition_metadata[channel_key]['filepath'])[0]
             if len(channel_image.shape) == 3 and channel_image.shape[2] == 3:
-                self.is_rgb[channel] = True
                 channel = channel.split('_')[0]
-                self.mono_channel_names.extend([f"{channel}_R", f"{channel}_G", f"{channel}_B"])
+                self.monochrome_channels.extend([f"{channel}_R", f"{channel}_G", f"{channel}_B"])
             else:
-                self.is_rgb[channel] = False
-                self.mono_channel_names.append(channel)
+                self.monochrome_channels.append(channel)
 
-        self.num_c = len(self.mono_channel_names)
-        self.channel_colors = [self.get_channel_color(name) for name in self.mono_channel_names]
+        self.num_c = len(self.monochrome_channels)
+        self.monochrome_colors = [self.get_channel_color(name) for name in self.monochrome_channels]
 
         # Print out information about the dataset
         print(f"Regions: {self.regions}, Channels: {self.channel_names}")
         print(f"FOV dimensions: {self.input_height}x{self.input_width}")
         print(f"{self.num_z} Z levels, {self.num_t} Time points")
-        print(f"{self.num_c} Channels: {self.mono_channel_names}")
+        print(f"{self.num_c} Channels: {self.monochrome_channels}")
         print(f"{len(self.regions)} Regions: {self.regions}")
         print(f"Number of FOVs per region: {self.num_fovs_per_region}")
 
 
-    def get_stitching_data(self, t, region):
+    def get_region_data(self, t, region):
         """Helper method to get region data with consistent filtering."""
-        print(f"Fetching data for timepoint {t} and region {region}")
         # Convert timepoint to int if it's not already
         t = int(t)
         
         # Filter data with explicit type matching
         data = {}
-        for key, value in self.stitching_data.items():
+        for key, value in self.acquisition_metadata.items():
             # Destructure the key tuple for clearer comparison
             key_t, key_region, _, _, _ = key
             if key_t == t and key_region == region:
                 data[key] = value
         
         if not data:
-            available_t = sorted(set(k[0] for k in self.stitching_data.keys()))
-            available_r = sorted(set(k[1] for k in self.stitching_data.keys()))
+            available_t = sorted(set(k[0] for k in self.acquisition_metadata.keys()))
+            available_r = sorted(set(k[1] for k in self.acquisition_metadata.keys()))
             print(f"\nAvailable timepoints in data: {available_t}")
             print(f"Available regions in data: {available_r}")
             raise ValueError(f"No data found for timepoint {t}, region {region}")
@@ -321,7 +313,7 @@ class CoordinateStitcher(QThread):
         t = int(timepoint) 
         
         # Get region data
-        region_data = self.get_stitching_data(t, region)
+        region_data = self.get_region_data(t, region)
         # Extract positions
         self.x_positions = sorted(set(tile_info['x'] for tile_info in region_data.values()))
         self.y_positions = sorted(set(tile_info['y'] for tile_info in region_data.values()))
@@ -376,15 +368,7 @@ class CoordinateStitcher(QThread):
         return da.zeros(output_shape, dtype=self.dtype, chunks=self.chunks)
 
 
-    def get_flatfields(self, progress_callback=None, timepoints_per_batch=4, batch_size=16):
-        """
-        Calculate flatfields with optimized memory usage by processing in batches.
-        
-        Args:
-            progress_callback: Progress update callback function
-            timepoints_per_batch: Number of timepoints to process at once (default=4)
-            batch_size: Maximum number of images per timepoint (default=16)
-        """
+    def get_flatfields(self, progress_callback=None):
         def process_images(images, channel_name):
             if images.size == 0:
                 print(f"WARNING: No images found for channel {channel_name}")
@@ -395,46 +379,31 @@ class CoordinateStitcher(QThread):
 
             basic = BaSiC(get_darkfield=False, smoothness_flatfield=1)
             basic.fit(images)
-            channel_index = self.mono_channel_names.index(channel_name)
+            channel_index = self.monochrome_channels.index(channel_name)
             self.flatfields[channel_index] = basic.flatfield
             if progress_callback:
                 progress_callback(channel_index + 1, self.num_c)
 
         for channel in self.channel_names:
             print(f"Calculating {channel} flatfield...")
-            
-            # Process timepoints in batches
-            all_images = []
-            timepoint_batches = [self.timepoints[i:i + timepoints_per_batch] 
-                               for i in range(0, len(self.timepoints), timepoints_per_batch)]
-            
-            for t_batch in timepoint_batches:
-                batch_images = []
-                for t in t_batch:
-                    time_images = [dask_imread(tile['filepath'])[0] 
-                                 for key, tile in self.stitching_data.items() 
-                                 if tile['channel'] == channel and key[0] == int(t)]
-                    
-                    if not time_images:
-                        print(f"WARNING: No images found for channel {channel} at timepoint {t}")
-                        continue
-                        
-                    random.shuffle(time_images)
-                    selected_tiles = time_images[:min(batch_size, len(time_images))]
-                    batch_images.extend(selected_tiles)
-                
-                if batch_images:
-                    all_images.extend(batch_images)
-                
-                # Clear batch memory
-                del batch_images
+            images = []
+            for t in self.timepoints:
+                time_images = [dask_imread(tile['filepath'])[0] for key, tile in self.acquisition_metadata.items() if tile['channel'] == channel and key[0] == int(t)]
+                if not time_images:
+                    print(f"WARNING: No images found for channel {channel} at timepoint {t}")
+                    continue
+                random.shuffle(time_images)
+                selected_tiles = time_images[:min(32, len(time_images))]
+                images.extend(selected_tiles)
 
-            if not all_images:
+                if len(images) > 48:
+                    break
+
+            if not images:
                 print(f"WARNING: No images found for channel {channel} across all timepoints")
                 continue
 
-            images = np.array(all_images)
-            del all_images  # Clear original list
+            images = np.array(images)
 
             if images.ndim == 3:
                 # Images are in the shape (N, Y, X)
@@ -457,7 +426,7 @@ class CoordinateStitcher(QThread):
 
 
     def calculate_shifts(self, t, region):
-        region_data = self.get_stitching_data(t, region)
+        region_data = self.get_region_data(t, region)
         # Get unique x and y positions
         x_positions = sorted(set(tile_info['x'] for tile_info in region_data.values()))
         y_positions = sorted(set(tile_info['y'] for tile_info in region_data.values()))
@@ -562,7 +531,7 @@ class CoordinateStitcher(QThread):
 
     def get_tile(self, t, region, x, y, channel, z_level):
         """Get a specific tile using standardized data access."""
-        region_data = self.get_stitching_data(int(t), str(region))
+        region_data = self.get_region_data(int(t), str(region))
         
         for key, value in region_data.items():
             if (value['x'] == x and 
@@ -578,28 +547,28 @@ class CoordinateStitcher(QThread):
         print(f"Warning: No matching tile found for region {region}, x={x}, y={y}, channel={channel}, z={z_level}")
         return None
 
-    def place_tile(self, stitched_images, tile, x_pixel, y_pixel, z_level, channel, t):
+    def place_tile(self, stitched_region, tile, x_pixel, y_pixel, z_level, channel, t):
         if len(tile.shape) == 2:
             # Handle 2D grayscale image
-            channel_idx = self.mono_channel_names.index(channel)
-            self.place_single_channel_tile(stitched_images, tile, x_pixel, y_pixel, z_level, channel_idx, 0)  # Always use t=0
+            channel_idx = self.monochrome_channels.index(channel)
+            self.place_single_channel_tile(stitched_region, tile, x_pixel, y_pixel, z_level, channel_idx, 0)  # Always use t=0
 
         elif len(tile.shape) == 3:
             if tile.shape[2] == 3:
                 # Handle RGB image
                 channel = channel.split('_')[0]
                 for i, color in enumerate(['R', 'G', 'B']):
-                    channel_idx = self.mono_channel_names.index(f"{channel}_{color}")
-                    self.place_single_channel_tile(stitched_images, tile[:,:,i], x_pixel, y_pixel, z_level, channel_idx, 0)  # Always use t=0
+                    channel_idx = self.monochrome_channels.index(f"{channel}_{color}")
+                    self.place_single_channel_tile(stitched_region, tile[:,:,i], x_pixel, y_pixel, z_level, channel_idx, 0)  # Always use t=0
             elif tile.shape[0] == 1:
-                channel_idx = self.mono_channel_names.index(channel)
-                self.place_single_channel_tile(stitched_images, tile[0], x_pixel, y_pixel, z_level, channel_idx, 0)  # Always use t=0
+                channel_idx = self.monochrome_channels.index(channel)
+                self.place_single_channel_tile(stitched_region, tile[0], x_pixel, y_pixel, z_level, channel_idx, 0)  # Always use t=0
         else:
             raise ValueError(f"Unexpected tile shape: {tile.shape}")
 
-    def place_single_channel_tile(self, stitched_images, tile, x_pixel, y_pixel, z_level, channel_idx, t):
-        if len(stitched_images.shape) != 5:
-            raise ValueError(f"Unexpected stitched_images shape: {stitched_images.shape}. Expected 5D array (t, c, z, y, x).")
+    def place_single_channel_tile(self, stitched_region, tile, x_pixel, y_pixel, z_level, channel_idx, t):
+        if len(stitched_region.shape) != 5:
+            raise ValueError(f"Unexpected stitched_region shape: {stitched_region.shape}. Expected 5D array (t, c, z, y, x).")
 
         if self.apply_flatfield:
             tile = self.apply_flatfield_correction(tile, channel_idx)
@@ -623,22 +592,22 @@ class CoordinateStitcher(QThread):
             x_pixel += left_crop
             y_pixel += top_crop
 
-        # Calculate end points based on stitched_images shape
-        y_end = min(y_pixel + tile.shape[0], stitched_images.shape[3])
-        x_end = min(x_pixel + tile.shape[1], stitched_images.shape[4])
+        # Calculate end points based on stitched_region shape
+        y_end = min(y_pixel + tile.shape[0], stitched_region.shape[3])
+        x_end = min(x_pixel + tile.shape[1], stitched_region.shape[4])
 
         # Extract the tile slice we'll use
         tile_slice = tile[:y_end-y_pixel, :x_end-x_pixel]
 
         try:
             # Place the tile slice - use t=0 since we're working with 1-timepoint arrays
-            stitched_images[0, channel_idx, z_level, y_pixel:y_end, x_pixel:x_end] = tile_slice
+            stitched_region[0, channel_idx, z_level, y_pixel:y_end, x_pixel:x_end] = tile_slice
         except Exception as e:
             print(f"ERROR: Failed to place tile. Details: {str(e)}")
             print(f"DEBUG: t:0, channel_idx:{channel_idx}, z_level:{z_level}, y:{y_pixel}-{y_end}, x:{x_pixel}-{x_end}")
             print(f"DEBUG: tile slice shape: {tile_slice.shape}")
-            print(f"DEBUG: stitched_images shape: {stitched_images.shape}")
-            print(f"DEBUG: output location shape: {stitched_images[0, channel_idx, z_level, y_pixel:y_end, x_pixel:x_end].shape}")
+            print(f"DEBUG: stitched_region shape: {stitched_region.shape}")
+            print(f"DEBUG: output location shape: {stitched_region[0, channel_idx, z_level, y_pixel:y_end, x_pixel:x_end].shape}")
             raise
 
     def apply_flatfield_correction(self, tile, channel_idx):
@@ -667,18 +636,18 @@ class CoordinateStitcher(QThread):
             # Convert to uint8 for saving as PNG
             combined_image_uint8 = (combined_image / np.iinfo(self.dtype).max * 255).astype(np.uint8)
             
-            cv2.imwrite(f"{self.input_folder}/{title}.png", combined_image_uint8)
+            cv2.imwrite(f"{self.output_folder}/{title}.png", combined_image_uint8)
             
             print(f"Saved {title}.png successfully")
         except Exception as e:
             print(f"Error in visualize_image: {e}")
     
-    def stitch_and_save_region(self, timepoint, region, progress_callback=None):
+    def stitch_region(self, timepoint, region, progress_callback=None):
         """Stitch and save single region for a specific timepoint."""
         
         # Initialize output array 
-        region_data = self.get_stitching_data(int(timepoint), region)
-        stitched_images = self.init_output(timepoint, region)
+        region_data = self.get_region_data(int(timepoint), region)
+        stitched_region = self.init_output(timepoint, region)
         x_min = min(self.x_positions)
         y_min = min(self.y_positions)
         total_tiles = len(region_data)
@@ -715,25 +684,20 @@ class CoordinateStitcher(QThread):
                 x_pixel = int((tile_info['x'] - x_min) * 1000 / self.pixel_size_um)
                 y_pixel = int((tile_info['y'] - y_min) * 1000 / self.pixel_size_um)
 
-            self.place_tile(stitched_images, tile, x_pixel, y_pixel, z_level, channel, t)
+            self.place_tile(stitched_region, tile, x_pixel, y_pixel, z_level, channel, t)
 
             # Update progress if callback provided
             if progress_callback:
                 progress_callback(processed_tiles, total_tiles)
-
-        # Save the region
-        self.starting_saving.emit(False)
-        # self.save_region_aics(timepoint, region, stitched_images)
-        self.save_region_ome_zarr(timepoint, region, stitched_images)
-
+        return stitched_region
     
-    def save_region_aics(self, timepoint, region, stitched_data):
+    def save_region_aics(self, timepoint, region, stitched_region):
         """Save stitched region data as OME-ZARR or OME-TIFF using aicsimageio."""
         # Ensure output directory exists
         output_path = os.path.join(self.output_folder, f"{timepoint}_stitched", 
                                   f"{region}_stitched{self.output_format}")
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
-        print(f"Array shape: {stitched_data.shape}")
+        print(f"Array shape: {stitched_region.shape}")
 
         # Create physical pixel sizes object
         physical_pixel_sizes = types.PhysicalPixelSizes(
@@ -748,7 +712,7 @@ class CoordinateStitcher(QThread):
 
         # Convert colors to RGB lists for OME format
         rgb_colors = [[c >> 16, (c >> 8) & 0xFF, c & 0xFF] 
-                     for c in self.channel_colors]
+                     for c in self.monochrome_colors]
 
         if self.output_format.endswith('.zarr'):
             print(f"Writing OME-ZARR to: {output_path}")
@@ -758,19 +722,19 @@ class CoordinateStitcher(QThread):
             # ome_meta = writer.build_ome(
             #     size_z=self.num_z,
             #     image_name=f"{region}_t{timepoint}",
-            #     channel_names=self.mono_channel_names,
-            #     channel_colors=self.channel_colors,
+            #     channel_names=self.monochrome_channels,
+            #     monochrome_colors=self.monochrome_colors,
             #     channel_minmax=channel_minmax
             # )
             
             # Write the image with metadata 
             # MUST EDIT SOURCE CODE (add channel_minmax in write_image in /lib/python3.10/site-packages/aicsimageio/writers/ome_zarr_writer.py)
             writer.write_image(
-                image_data=stitched_data,
+                image_data=stitched_region,
                 image_name=f"{region}_t{timepoint}",
                 physical_pixel_sizes=physical_pixel_sizes,
-                channel_names=self.mono_channel_names,
-                channel_colors=self.channel_colors, # rgb_colors,
+                channel_names=self.monochrome_channels,
+                monochrome_colors=self.monochrome_colors, # rgb_colors,
                 channel_minmax=channel_minmax,
                 chunk_dims=self.chunks,
                 scale_num_levels=self.num_pyramid_levels,
@@ -783,31 +747,31 @@ class CoordinateStitcher(QThread):
             
             # Build OME metadata for TIFF
             ome_meta = OmeTiffWriter.build_ome(
-                data_shapes=[stitched_data.shape],
-                data_types=[stitched_data.dtype],
+                data_shapes=[stitched_region.shape],
+                data_types=[stitched_region.dtype],
                 dimension_order=["TCZYX"],
-                channel_names=[self.mono_channel_names],
+                channel_names=[self.monochrome_channels],
                 image_name=[f"{region}_t{timepoint}"],
                 physical_pixel_sizes=[physical_pixel_sizes],
-                channel_colors=[rgb_colors]
+                monochrome_colors=[rgb_colors]
             )
             
             # Write the image with metadata
             OmeTiffWriter.save(
-                data=stitched_data,
+                data=stitched_region,
                 uri=output_path,
                 dim_order="TCZYX",
                 ome_xml=ome_meta,
-                channel_names=self.mono_channel_names,
+                channel_names=self.monochrome_channels,
                 image_name=f"{region}_t{timepoint}",
                 physical_pixel_sizes=physical_pixel_sizes,
-                channel_colors=rgb_colors
+                monochrome_colors=rgb_colors
             )
         
         print(f"Successfully saved to: {output_path}")
         return output_path
 
-    def save_region_ome_zarr(self, timepoint, region, stitched_data):
+    def save_region_ome_zarr(self, timepoint, region, stitched_region):
         """
         Save stitched region data as OME-ZARR using direct pyramid writing.
         Optimized for large microscopy datasets with proper physical coordinates.
@@ -815,7 +779,7 @@ class CoordinateStitcher(QThread):
         Args:
             timepoint: The timepoint of the data
             region: The region identifier
-            stitched_data: The 5D image data array (TCZYX)
+            stitched_region: The 5D image data array (TCZYX)
             
         Returns:
             str: Path to the saved OME-ZARR file
@@ -823,9 +787,9 @@ class CoordinateStitcher(QThread):
         output_path = os.path.join(self.output_folder, f"{timepoint}_stitched", 
                                   f"{region}_stitched.ome.zarr")
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
-        print(f"Array shape: {stitched_data.shape}")
+        print(f"Array shape: {stitched_region.shape}")
         # For debug: Save a 2D slice if needed
-        # self._save_debug_slice(stitched_data, output_path)
+        # self._save_debug_slice(stitched_region, output_path)
 
         # Create zarr store and root group
         store = ome_zarr.io.parse_url(output_path, mode="w").store
@@ -833,7 +797,7 @@ class CoordinateStitcher(QThread):
 
         # Calculate pyramid using scaler - maintains efficiency for both dask and numpy arrays
         scaler = ome_zarr.scale.Scaler(max_layer=self.num_pyramid_levels - 1)
-        pyramid = scaler.nearest(stitched_data)
+        pyramid = scaler.nearest(stitched_region)
 
         # Define correct physical coordinates with proper micrometer scaling
         transforms = []
@@ -890,17 +854,17 @@ class CoordinateStitcher(QThread):
                 "active": True,
                 "coefficient": 1,
                 "family": "linear"
-            } for name, color in zip(self.mono_channel_names, self.channel_colors)]
+            } for name, color in zip(self.monochrome_channels, self.monochrome_colors)]
         }
 
         print(f"Successfully saved OME-ZARR to: {output_path}")
         return output_path
 
-    def _save_debug_slice(self, stitched_data, zarr_path):
+    def _save_debug_slice(self, stitched_region, zarr_path):
         """Convert TCZYX to XYC RGB format using first 3 channels."""
         try:
             # Get up to first 3 channels and convert to numpy if needed
-            channels = stitched_data[0, :3, 0]  # [c<=3, y, x]
+            channels = stitched_region[0, :3, 0]  # [c<=3, y, x]
             if isinstance(channels, da.Array):
                 channels = channels.compute()
             
@@ -997,7 +961,7 @@ class CoordinateStitcher(QThread):
                     "label": name,
                     "color": f"{color:06X}",
                     "window": {"start": 0, "end": np.iinfo(self.dtype).max}
-                } for name, color in zip(self.mono_channel_names, self.channel_colors)]
+                } for name, color in zip(self.monochrome_channels, self.monochrome_colors)]
             }
         
         self.finished_saving.emit(output_path, self.dtype)
@@ -1150,7 +1114,7 @@ class CoordinateStitcher(QThread):
                         "label": name,
                         "color": f"{color:06X}",
                         "window": {"start": 0, "end": np.iinfo(self.dtype).max}
-                    } for name, color in zip(self.mono_channel_names, self.channel_colors)]
+                    } for name, color in zip(self.monochrome_channels, self.monochrome_colors)]
                 }
             
             if t == self.timepoints[-1]:
@@ -1250,7 +1214,7 @@ class CoordinateStitcher(QThread):
                     "label": name,
                     "color": f"{color:06X}",
                     "window": {"start": 0, "end": np.iinfo(self.dtype).max}
-                } for name, color in zip(self.mono_channel_names, self.channel_colors)]
+                } for name, color in zip(self.monochrome_channels, self.monochrome_colors)]
             }
         
         self.finished_saving.emit(output_path, self.dtype)
@@ -1266,7 +1230,9 @@ class CoordinateStitcher(QThread):
         stime = time.time()
         # Initial setup
         self.get_timepoints()
-        self.parse_filenames()
+        self.extract_acquisition_parameters()
+        self.get_pixel_size()
+        self.parse_acquisition_metadata()
 
         if self.apply_flatfield:
             print("Calculating flatfields...")
@@ -1295,7 +1261,12 @@ class CoordinateStitcher(QThread):
                 
                 # Stitch region
                 self.starting_stitching.emit()
-                stitched_data = self.stitch_and_save_region(timepoint, region, progress_callback=self.update_progress.emit)
+                stitched_region = self.stitch_region(timepoint, region, progress_callback=self.update_progress.emit)
+                
+                # Save the region
+                self.starting_saving.emit(False)
+                self.save_region_ome_zarr(timepoint, region, stitched_region)
+                # self.save_region_aics(timepoint, region, stitched_region)           
                 
             print(f"Time to process timepoint {timepoint}: {time.time() - ttime}")
         
@@ -1318,7 +1289,6 @@ class CoordinateStitcher(QThread):
                                      f"{self.regions[-1]}_stitched{self.output_format}")
             self.finished_saving.emit(final_path, self.dtype)
 
-        
         print(f"Post-processing time: {time.time() - post_time}")
         print(f"Total processing time: {time.time() - stime}")
 

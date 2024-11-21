@@ -158,7 +158,7 @@ class StitchingGUI(QWidget):
                         self.useRegistrationCheck.setChecked(False)
                         return
 
-                    stitcher.parse_filenames()  # No timepoint parameter needed
+                    stitcher.parse_acquisition_metadata()  # No timepoint parameter needed
                     
                     # Setup Z-Level
                     self.zLevelInput.setMinimum(0)
