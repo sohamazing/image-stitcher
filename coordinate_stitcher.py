@@ -52,9 +52,7 @@ class CoordinateStitcher(QThread):
         
         # Default merge parameters to False
         self.merge_timepoints = params.merge_timepoints if hasattr(params, 'merge_timepoints') else False
-        print("merge time points", self.merge_timepoints)
         self.merge_hcs_regions = params.merge_hcs_regions if hasattr(params, 'merge_hcs_regions') else False
-        print("merge hcs regions", self.merge_hcs_regions)
         
          # Setup output paths using the standardized base folder
         self.per_timepoint_region_output_template = os.path.join(
@@ -136,7 +134,7 @@ class CoordinateStitcher(QThread):
         obj_tube_lens_mm = self.acquisition_params['objective']['tube_lens_f_mm']
         sensor_pixel_size_um = self.acquisition_params['sensor_pixel_size_um']
         tube_lens_mm = self.acquisition_params['tube_lens_mm']
-
+        self.pixel_binning = self.acquisition_params.get('pixel_binning', 1)
         obj_focal_length_mm = obj_tube_lens_mm / obj_mag
         actual_mag = tube_lens_mm / obj_focal_length_mm
         self.pixel_size_um = sensor_pixel_size_um / actual_mag
@@ -354,9 +352,6 @@ class CoordinateStitcher(QThread):
 
         self.num_pyramid_levels = max(1, math.ceil(np.log2(max(width_pixels, height_pixels) / 1024 * max_dimension)))
         
-        print(f"Calculated dimensions for region {region}: {width_pixels}x{height_pixels} pixels")
-        print(f"Number of pyramid levels: {self.num_pyramid_levels}")
-        
         return width_pixels, height_pixels
 
     def init_output(self, timepoint, region):
@@ -364,7 +359,7 @@ class CoordinateStitcher(QThread):
         width, height = self.calculate_output_dimensions(timepoint, region)
         # create zeros with the right shape/dtype per timepoint per region
         output_shape = (1, self.num_c, self.num_z, height, width)
-        print(f"Output shape for region {region}: {output_shape}")
+        print(f"region {region} timepoint {timepoint} output array dimensions: {output_shape}")
         return da.zeros(output_shape, dtype=self.dtype, chunks=self.chunks)
 
 
@@ -454,8 +449,8 @@ class CoordinateStitcher(QThread):
         dx_pixels = dx_mm * 1000 / self.pixel_size_um
         dy_pixels = dy_mm * 1000 / self.pixel_size_um
 
-        max_x_overlap = round(abs(self.input_width - dx_pixels) * 1.05)
-        max_y_overlap = round(abs(self.input_height - dy_pixels) * 1.05)
+        max_x_overlap = round(abs(self.input_width - dx_pixels) * 1.05) // self.pixel_binning
+        max_y_overlap = round(abs(self.input_height - dy_pixels) * 1.05) // self.pixel_binning
         print("objective calculated - vertical overlap:", max_y_overlap, ", horizontal overlap:", max_x_overlap)
 
         # Find center positions
@@ -644,7 +639,7 @@ class CoordinateStitcher(QThread):
     
     def stitch_region(self, timepoint, region, progress_callback=None):
         """Stitch and save single region for a specific timepoint."""
-        
+        start_time = time.time()
         # Initialize output array 
         region_data = self.get_region_data(int(timepoint), region)
         stitched_region = self.init_output(timepoint, region)
@@ -689,15 +684,18 @@ class CoordinateStitcher(QThread):
             # Update progress if callback provided
             if progress_callback:
                 progress_callback(processed_tiles, total_tiles)
+                processed_tiles += 1
+
+        print(f"Time to stitch region {region} timepoint {t}: {time.time() - start_time}")
         return stitched_region
     
     def save_region_aics(self, timepoint, region, stitched_region):
         """Save stitched region data as OME-ZARR or OME-TIFF using aicsimageio."""
+        start_time = time.time()
         # Ensure output directory exists
         output_path = os.path.join(self.output_folder, f"{timepoint}_stitched", 
                                   f"{region}_stitched{self.output_format}")
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
-        print(f"Array shape: {stitched_region.shape}")
 
         # Create physical pixel sizes object
         physical_pixel_sizes = types.PhysicalPixelSizes(
@@ -769,6 +767,7 @@ class CoordinateStitcher(QThread):
             )
         
         print(f"Successfully saved to: {output_path}")
+        print(f"Time to save region {region} timepoint {timepoint}: {time.time() - start_time}")
         return output_path
 
     def save_region_ome_zarr(self, timepoint, region, stitched_region):
@@ -784,10 +783,11 @@ class CoordinateStitcher(QThread):
         Returns:
             str: Path to the saved OME-ZARR file
         """
+        start_time = time.time()
         output_path = os.path.join(self.output_folder, f"{timepoint}_stitched", 
                                   f"{region}_stitched.ome.zarr")
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
-        print(f"Array shape: {stitched_region.shape}")
+        print(f"Writing OME-ZARR to: {output_path}")
         # For debug: Save a 2D slice if needed
         # self._save_debug_slice(stitched_region, output_path)
 
@@ -856,8 +856,8 @@ class CoordinateStitcher(QThread):
                 "family": "linear"
             } for name, color in zip(self.monochrome_channels, self.monochrome_colors)]
         }
-
         print(f"Successfully saved OME-ZARR to: {output_path}")
+        print(f"Time to save region {region} timepoint {timepoint}: {time.time() - start_time}")
         return output_path
 
     def _save_debug_slice(self, stitched_region, zarr_path):
@@ -943,7 +943,7 @@ class CoordinateStitcher(QThread):
             # Generate and write pyramid
             pyramid = self.generate_pyramid(merged_data, self.num_pyramid_levels)
             storage_options = {"chunks": self.chunks}
-            
+            print(f"Writing time series for region {region}")
             ome_zarr.writer.write_multiscale(
                 pyramid=pyramid,
                 group=region_group,
@@ -1257,6 +1257,7 @@ class CoordinateStitcher(QThread):
             os.makedirs(t_output_dir, exist_ok=True)
             
             for region in self.regions:
+                rtime = time.time()
                 print(f"Processing region {region}...")
                 
                 # Stitch region
@@ -1266,9 +1267,10 @@ class CoordinateStitcher(QThread):
                 # Save the region
                 self.starting_saving.emit(False)
                 self.save_region_ome_zarr(timepoint, region, stitched_region)
-                # self.save_region_aics(timepoint, region, stitched_region)           
+                # self.save_region_aics(timepoint, region, stitched_region)
+                print(f"Completed region {region}: {time.time() - rtime}")           
                 
-            print(f"Time to process timepoint {timepoint}: {time.time() - ttime}")
+            print(f"Completed timepoint {timepoint}: {time.time() - ttime}")
         
         # Post-processing based on merge settings
         post_time = time.time()

@@ -118,6 +118,11 @@ def main():
 
 if __name__ == '__main__':
     main()
+    
+# # Example usage
+# python3 stitcher_cli.py --input-folder /Users/soham/Documents/cephla/scan-data/lql-B1_edge_laser_af_test_2024-10-25_13-05-33.082156 --use-registration --apply-flatfield
+# or
+# python3 stitcher_cli.py -i /Users/soham/Documents/cephla/scan-data/lql-B1_edge_laser_af_test_2024-10-25_13-05-33.082156 -r -ff
 
 # # Basic usage
 # python stitcher_cli.py -i /path/to/images
@@ -126,4 +131,4 @@ if __name__ == '__main__':
 # python stitcher_cli.py -i /path/to/images -r -ff --registration-channel "488"
 
 # # Full pipeline with merging
-# python stitcher_cli.py -i /path/to/images -r -ff -mt -mw --scan-pattern "S-Pattern" --dynamic-registration
+# python stitcher_cli.py -i /path/to/images -r -ff -mt -mw --scan-pattern "S-Pattern"
