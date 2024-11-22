@@ -22,17 +22,25 @@ Issues: https://github.com/conda-forge/miniforge?tab=readme-ov-file#windows
 
 ### 2. Install requirments in conda environment
 ```bash
-chmod +x install_requirements.sh
-./install_requirements.sh
-conda activate stitching
+wget https://raw.githubusercontent.com/hongquanli/octopi-research/master/software/setup_22.04.sh
+chmod +x setup_22.04.sh
+./setup_22.04.sh
+pip install dask_image
+pip install ome_zarr
+pip install aicsimageio
+pip install basicpy
 ```
 ### 3. Run Stitcher
 ```bash
-python3 stitcherGUI.py
+python3 stitcher_gui.py
 ```
 or
 ```bash
-python3 stitcherGUI_v1.py
+python3 stitcher_cli.py -i /path/to/images
+```
+or with registration and flatfield correction
+```bash
+python stitcher_cli.py -i /path/to/images -r -ff --registration-channel "488"
 ```
 ## User Inputs 
 ### Use Registration to Align
