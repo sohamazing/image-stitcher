@@ -449,8 +449,8 @@ class CoordinateStitcher(QThread):
         dx_pixels = dx_mm * 1000 / self.pixel_size_um
         dy_pixels = dy_mm * 1000 / self.pixel_size_um
 
-        max_x_overlap = round(abs(self.input_width - dx_pixels) * 1.05) // self.pixel_binning
-        max_y_overlap = round(abs(self.input_height - dy_pixels) * 1.05) // self.pixel_binning
+        max_x_overlap = round(abs(self.input_width - dx_pixels) * 1.05) // self.pixel_binning # edit this ("pixel_binning": 2) in acquisition params.json , if registration crop too big or too small in horizontal.png
+        max_y_overlap = round(abs(self.input_height - dy_pixels) * 1.05) // self.pixel_binning # edit this ("pixel_binning": 2) in acquisition params.json, if registration crop too big or too small in vertical.png
         print("objective calculated - vertical overlap:", max_y_overlap, ", horizontal overlap:", max_x_overlap)
 
         # Find center positions
@@ -502,7 +502,7 @@ class CoordinateStitcher(QThread):
         img1 = self.normalize_image(img1)
         img2 = self.normalize_image(img2)
 
-        margin = int(img1.shape[0] * 0.2)  # 20% margin
+        margin = int(img1.shape[0] * 0.25)  # 25% margin
         img1_overlap = img1[margin:-margin, -max_overlap:]
         img2_overlap = img2[margin:-margin, :max_overlap]
 
@@ -515,7 +515,7 @@ class CoordinateStitcher(QThread):
         img1 = self.normalize_image(img1)
         img2 = self.normalize_image(img2)
 
-        margin = int(img1.shape[1] * 0.2)  # 20% margin
+        margin = int(img1.shape[1] * 0.25)  # 25% margin
         img1_overlap = img1[-max_overlap:, margin:-margin]
         img2_overlap = img2[:max_overlap, margin:-margin]
 
