@@ -454,20 +454,20 @@ class CoordinateStitcher(QThread):
         print("objective calculated - vertical overlap:", max_y_overlap, ", horizontal overlap:", max_x_overlap)
 
         # Find center positions
-        center_x_index = (len(x_positions) - 1) // 2
-        center_y_index = (len(y_positions) - 1) // 2
+        center_tile_x_index = (len(x_positions) - 1) // 2
+        center_tile_y_index = (len(y_positions) - 1) // 2
         
-        center_x = x_positions[center_x_index]
-        center_y = y_positions[center_y_index]
+        center_tile_x = x_positions[center_tile_x_index]
+        center_tile_y = y_positions[center_tile_y_index]
 
-        right_x = None
-        bottom_y = None
+        right_tile_x = None
+        bottom_tile_y = None
 
         # Calculate horizontal shift
-        if center_x_index + 1 < len(x_positions):
-            right_x = x_positions[center_x_index + 1]
-            center_tile = self.get_tile(t, region, center_x, center_y, self.registration_channel, self.registration_z_level)
-            right_tile = self.get_tile(t, region, right_x, center_y, self.registration_channel, self.registration_z_level)
+        if center_tile_x_index + 1 < len(x_positions):
+            right_tile_x = x_positions[center_tile_x_index + 1]
+            center_tile = self.get_tile(t, region, center_tile_x, center_tile_y, self.registration_channel, self.registration_z_level)
+            right_tile = self.get_tile(t, region, right_tile_x, center_tile_y, self.registration_channel, self.registration_z_level)
             
             if center_tile is not None and right_tile is not None:
                 self.h_shift = self.calculate_horizontal_shift(center_tile, right_tile, max_x_overlap)
@@ -475,54 +475,54 @@ class CoordinateStitcher(QThread):
                 print(f"Warning: Missing tiles for horizontal shift calculation in region {region}.")
         
         # Calculate vertical shift
-        if center_y_index + 1 < len(y_positions):
-            bottom_y = y_positions[center_y_index + 1]
-            center_tile = self.get_tile(t, region, center_x, center_y, self.registration_channel, self.registration_z_level)
-            bottom_tile = self.get_tile(t, region, center_x, bottom_y, self.registration_channel, self.registration_z_level)
+        if center_tile_y_index + 1 < len(y_positions):
+            bottom_tile_y = y_positions[center_tile_y_index + 1]
+            center_tile = self.get_tile(t, region, center_tile_x, center_tile_y, self.registration_channel, self.registration_z_level)
+            bottom_tile = self.get_tile(t, region, center_tile_x, bottom_tile_y, self.registration_channel, self.registration_z_level)
             
             if center_tile is not None and bottom_tile is not None:
                 self.v_shift = self.calculate_vertical_shift(center_tile, bottom_tile, max_y_overlap)
             else:
                 print(f"Warning: Missing tiles for vertical shift calculation in region {region}.")
 
-        if self.scan_pattern == 'S-Pattern' and right_x and bottom_y:
-            center_tile = self.get_tile(t, region, center_x, bottom_y, self.registration_channel, self.registration_z_level)
-            right_tile = self.get_tile(t, region, right_x, bottom_y, self.registration_channel, self.registration_z_level)
+        if self.scan_pattern == 'S-Pattern' and right_tile_x and bottom_tile_y:
+            center_tile = self.get_tile(t, region, center_tile_x, bottom_tile_y, self.registration_channel, self.registration_z_level)
+            right_tile = self.get_tile(t, region, right_tile_x, bottom_tile_y, self.registration_channel, self.registration_z_level)
 
             if center_tile is not None and right_tile is not None:
                 self.h_shift_rev = self.calculate_horizontal_shift(center_tile, right_tile, max_x_overlap)
-                self.h_shift_rev_odd = center_y_index % 2 == 0
+                self.h_shift_rev_odd = center_tile_y_index % 2 == 0
                 print(f"Bi-Directional Horizontal Shift - Reverse Horizontal: {self.h_shift_rev}")
             else:
                 print(f"Warning: Missing tiles for reverse horizontal shift calculation in region {region}.")
 
         print(f"Calculated Uni-Directional Shifts - Horizontal: {self.h_shift}, Vertical: {self.v_shift}")
 
-    def calculate_horizontal_shift(self, img1, img2, max_overlap):
-        img1 = self.normalize_image(img1)
-        img2 = self.normalize_image(img2)
+    def calculate_horizontal_shift(self, img_left, img_right, max_overlap):
+        img_left = self.normalize_image(img_left)
+        img_right = self.normalize_image(img_right)
 
-        margin = int(img1.shape[0] * 0.25)  # 25% margin
-        img1_overlap = img1[margin:-margin, -max_overlap:]
-        img2_overlap = img2[margin:-margin, :max_overlap]
+        margin = int(img_left.shape[0] * 0.25)  # 25% margin
+        img_left_overlap = img_left[margin:-margin, -max_overlap:]
+        img_right_overlap = img_right[margin:-margin, :max_overlap]
 
-        self.visualize_image(img1_overlap, img2_overlap, 'horizontal')
+        self.visualize_image(img_left_overlap, img_right_overlap, 'horizontal')
 
-        shift, error, diffphase = phase_cross_correlation(img1_overlap, img2_overlap, upsample_factor=10)
-        return round(shift[0]), round(shift[1] - img1_overlap.shape[1])
+        shift, error, diffphase = phase_cross_correlation(img_left_overlap, img_right_overlap, upsample_factor=10)
+        return round(shift[0]), round(shift[1] - img_left_overlap.shape[1])
 
-    def calculate_vertical_shift(self, img1, img2, max_overlap):
-        img1 = self.normalize_image(img1)
-        img2 = self.normalize_image(img2)
+    def calculate_vertical_shift(self, img_top, img_bot, max_overlap):
+        img_top = self.normalize_image(img_top)
+        img_bot = self.normalize_image(img_bot)
 
-        margin = int(img1.shape[1] * 0.25)  # 25% margin
-        img1_overlap = img1[-max_overlap:, margin:-margin]
-        img2_overlap = img2[:max_overlap, margin:-margin]
+        margin = int(img_top.shape[1] * 0.25)  # 25% margin
+        img_top_overlap = img_top[-max_overlap:, margin:-margin]
+        img_bot_overlap = img_bot[:max_overlap, margin:-margin]
 
-        self.visualize_image(img1_overlap, img2_overlap, 'vertical')
+        self.visualize_image(img_top_overlap, img_bot_overlap, 'vertical')
 
-        shift, error, diffphase = phase_cross_correlation(img1_overlap, img2_overlap, upsample_factor=10)
-        return round(shift[0] - img1_overlap.shape[0]), round(shift[1])
+        shift, error, diffphase = phase_cross_correlation(img_top_overlap, img_bot_overlap, upsample_factor=10)
+        return round(shift[0] - img_top_overlap.shape[0]), round(shift[1])
 
     def get_tile(self, t, region, x, y, channel, z_level):
         """Get a specific tile using standardized data access."""
