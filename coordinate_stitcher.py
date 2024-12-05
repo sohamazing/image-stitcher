@@ -449,8 +449,8 @@ class CoordinateStitcher(QThread):
         dx_pixels = dx_mm * 1000 / self.pixel_size_um
         dy_pixels = dy_mm * 1000 / self.pixel_size_um
 
-        max_x_overlap = round(abs(self.input_width - dx_pixels) * 1.05) // self.pixel_binning # edit this ("pixel_binning": 2) in acquisition params.json , if registration crop too big or too small in horizontal.png
-        max_y_overlap = round(abs(self.input_height - dy_pixels) * 1.05) // self.pixel_binning # edit this ("pixel_binning": 2) in acquisition params.json, if registration crop too big or too small in vertical.png
+        max_x_overlap = round(abs(self.input_width - dx_pixels) * 1.05) // 2 * self.pixel_binning # edit this ("pixel_binning": 2) in acquisition params.json , if registration crop too big or too small in horizontal.png
+        max_y_overlap = round(abs(self.input_height - dy_pixels) * 1.05) // 2 * self.pixel_binning # edit this ("pixel_binning": 2) in acquisition params.json, if registration crop too big or too small in vertical.png
         print("objective calculated - vertical overlap:", max_y_overlap, ", horizontal overlap:", max_x_overlap)
 
         # Find center positions
