@@ -68,6 +68,7 @@ class StitchingGUI(QWidget):
         self.outputFormatCombo = QComboBox()
         self.outputFormatCombo.addItems(['OME-ZARR', 'OME-TIFF'])
         self.layout.addWidget(self.outputFormatCombo)
+        self.outputFormatCombo.currentTextChanged.connect(self.onOutputFormatChanged)
 
         # Status label
         self.statusLabel = QLabel('Status: Ready', self)
@@ -163,6 +164,12 @@ class StitchingGUI(QWidget):
         if not self.inputDirectory:
             QMessageBox.warning(self, "Input Error", "Please select an input directory.")
             return
+
+        # # In StitchingGUI.onStitchingStart():
+        # if self.outputFormatCombo.currentText() == 'OME-TIFF' and (self.mergeTimepointsCheck.isChecked() or self.mergeRegionsCheck.isChecked()):
+        #     QMessageBox.warning(self, "Format Warning", 
+        #                        "Merging operations are only supported for OME-ZARR format. "
+        #                        "These operations will be skipped.")
             
         try:
             # Create parameters from UI state
@@ -233,9 +240,18 @@ class StitchingGUI(QWidget):
         QMessageBox.critical(self, "Error", f"Error while processing: {error}")
         self.statusLabel.setText("Error Occurred!")
 
+    # In StitchingGUI class
+    def onOutputFormatChanged(self):
+        is_zarr = self.outputFormatCombo.currentText() == 'OME-ZARR'
+        self.mergeTimepointsCheck.setEnabled(is_zarr)
+        self.mergeRegionsCheck.setEnabled(is_zarr)
+        if not is_zarr:
+            self.mergeTimepointsCheck.setChecked(False)
+            self.mergeRegionsCheck.setChecked(False)
+
     def onViewOutput(self):
         output_path = self.outputPathEdit.text()
-        output_format = ".ome.zarr" if output_path.endswith(".ome.zarr") else None
+        output_format = ".ome.zarr" if output_path.endswith(".ome.zarr") else ".ome.tiff"
         try:
             viewer = napari.Viewer()
             if ".ome.zarr" in output_path:

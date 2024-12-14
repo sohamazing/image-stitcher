@@ -721,7 +721,7 @@ class CoordinateStitcher(QThread):
             #     size_z=self.num_z,
             #     image_name=f"{region}_t{timepoint}",
             #     channel_names=self.monochrome_channels,
-            #     monochrome_colors=self.monochrome_colors,
+            #     channel_colors=self.monochrome_colors,
             #     channel_minmax=channel_minmax
             # )
             
@@ -732,7 +732,7 @@ class CoordinateStitcher(QThread):
                 image_name=f"{region}_t{timepoint}",
                 physical_pixel_sizes=physical_pixel_sizes,
                 channel_names=self.monochrome_channels,
-                monochrome_colors=self.monochrome_colors, # rgb_colors,
+                channel_colors=self.monochrome_colors, # rgb_colors,
                 channel_minmax=channel_minmax,
                 chunk_dims=self.chunks,
                 scale_num_levels=self.num_pyramid_levels,
@@ -751,7 +751,7 @@ class CoordinateStitcher(QThread):
                 channel_names=[self.monochrome_channels],
                 image_name=[f"{region}_t{timepoint}"],
                 physical_pixel_sizes=[physical_pixel_sizes],
-                monochrome_colors=[rgb_colors]
+                channel_colors=[rgb_colors]
             )
             
             # Write the image with metadata
@@ -763,7 +763,7 @@ class CoordinateStitcher(QThread):
                 channel_names=self.monochrome_channels,
                 image_name=f"{region}_t{timepoint}",
                 physical_pixel_sizes=physical_pixel_sizes,
-                monochrome_colors=rgb_colors
+                channel_colors=rgb_colors
             )
         
         print(f"Successfully saved to: {output_path}")
@@ -1266,9 +1266,13 @@ class CoordinateStitcher(QThread):
                 
                 # Save the region
                 self.starting_saving.emit(False)
-                self.save_region_ome_zarr(timepoint, region, stitched_region)
-                # self.save_region_aics(timepoint, region, stitched_region)
-                print(f"Completed region {region}: {time.time() - rtime}")           
+                # if self.output_format.endswith('.zarr'):
+                #     output_path = self.save_region_ome_zarr(timepoint, region, stitched_region)
+                # else:  # .tiff
+                #     output_path = self.save_region_aics(timepoint, region, stitched_region)
+                output_path = self.save_region_aics(timepoint, region, stitched_region)
+
+                print(f"Completed region {region} (saved to {output_path}): {time.time() - rtime}")          
                 
             print(f"Completed timepoint {timepoint}: {time.time() - ttime}")
         
