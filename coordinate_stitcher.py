@@ -167,7 +167,7 @@ class CoordinateStitcher(QThread):
 
             # Process each image file
             image_files = sorted([f for f in os.listdir(image_folder) 
-                                if f.endswith(('.bmp', '.tiff')) and 'focus_camera' not in f])
+                                if f.endswith(('.bmp', '.tiff', 'tif', 'jpg', 'jpeg', 'png')) and 'focus_camera' not in f])
             
             for file in image_files:
                 parts = file.split('_', 3)
