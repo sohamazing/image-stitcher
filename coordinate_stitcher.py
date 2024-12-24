@@ -1266,11 +1266,11 @@ class CoordinateStitcher(QThread):
                 
                 # Save the region
                 self.starting_saving.emit(False)
-                # if self.output_format.endswith('.zarr'):
-                #     output_path = self.save_region_ome_zarr(timepoint, region, stitched_region)
-                # else:  # .tiff
-                #     output_path = self.save_region_aics(timepoint, region, stitched_region)
-                output_path = self.save_region_aics(timepoint, region, stitched_region)
+                if self.output_format.endswith('.zarr'):
+                    output_path = self.save_region_ome_zarr(timepoint, region, stitched_region)
+                else:  # .tiff
+                    output_path = self.save_region_aics(timepoint, region, stitched_region)
+                # output_path = self.save_region_aics(timepoint, region, stitched_region)
 
                 print(f"Completed region {region} (saved to {output_path}): {time.time() - rtime}")          
                 
