@@ -35,6 +35,7 @@ python stitcher_cli.py -i /path/to/images -r -ff --registration-channel "Fluores
 ### Select Input Folder
   - The input folder should be the folder named with Experiment ID which contains all the timepoints of your acquired images, `acquisition parameters.json` and `configurations.xml`
   - Make sure `acquisiton parameters.json` file contains the correct information for objective magnification and sensor_pixel_size_um, etc.
+  - The stitcher works with imaging data acquired with the latest Squid software. For data acquired with older version software, use `update_coordinates.py` to update `coordinates.csv` format. See __Updating coordinates.csv file__ part.
 ### Flatfield Correction
   - When this option is checked, the stitcher will apply flatfield to individual images using baSiCPy when stitching
 ### Cross-Correlation Registration
@@ -45,3 +46,16 @@ python stitcher_cli.py -i /path/to/images -r -ff --registration-channel "Fluores
   - Either OME-ZARR or OME-TIFF
 ### View Output 
   - Opens filepath to visualize in napari viewer
+
+## Scripts for Data Pre-processing
+### Updating coordinates.csv file
+Run:
+```bash
+python3 update_coordinates.py <input folder>
+```
+- This script updates `coordinates.csv` in data acquired with older version Squid software to match the format in latest version
+- The input folder should be the folder named with Experiment ID which contains all the timepoints of your acquired images, `acquisition parameters.json` and `configurations.xml`
+- Only works for data acquired with Wellplate Multipoint
+
+### Converting Flexible Multipoint data into Wellplate Multipoint format
+Use `convert_to_coordinate_acquisition.py`. To be tested.
