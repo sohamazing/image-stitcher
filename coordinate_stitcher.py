@@ -46,7 +46,6 @@ class CoordinateStitcher(QThread):
         # Core attributes from parameters
         self.input_folder = params.input_folder
         self.output_folder = params.stitched_folder
-        os.makedirs(self.output_folder, exist_ok=True)
         
         self.output_format = params.output_format
         
@@ -1233,6 +1232,8 @@ class CoordinateStitcher(QThread):
         self.extract_acquisition_parameters()
         self.get_pixel_size()
         self.parse_acquisition_metadata()
+
+        os.makedirs(self.output_folder, exist_ok=True)
 
         if self.apply_flatfield:
             print("Calculating flatfields...")

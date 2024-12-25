@@ -3,6 +3,7 @@ from dataclasses import dataclass
 from typing import Dict, Any
 import json
 import os
+from datetime import datetime
 
 @dataclass
 class StitchingParameters:
@@ -61,7 +62,7 @@ class StitchingParameters:
     @property
     def stitched_folder(self) -> str:
         """Path to folder containing stitched outputs."""
-        return os.path.join(self.input_folder + "_stitched")
+        return os.path.join(self.input_folder + "_stitched_" + datetime.now().strftime('%Y-%m-%d_%H-%M-%S.%f'))
     
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'StitchingParameters':
