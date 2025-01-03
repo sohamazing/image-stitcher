@@ -760,7 +760,6 @@ class CoordinateStitcher(QThread):
                 dim_order="TCZYX",
                 ome_xml=ome_meta,
                 channel_names=self.monochrome_channels,
-                image_name=f"{region}_t{timepoint}",
                 physical_pixel_sizes=physical_pixel_sizes,
                 channel_colors=rgb_colors
             )
