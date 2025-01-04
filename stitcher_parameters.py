@@ -40,7 +40,7 @@ class StitchingParameters:
         Raises:
             ValueError: If parameters are invalid or incompatible
         """
-        Validate input folder
+        # Validate input folder
         if not os.path.exists(self.input_folder):
             raise ValueError(f"Input folder does not exist: {self.input_folder}")
         
@@ -55,7 +55,7 @@ class StitchingParameters:
         # Validate registration settings
         if self.use_registration:
             if self.registration_z_level < 0:
-                raise ValueError("Registration Z-level must be non-negative")
+                raise ValueError("Registration Z-level must be non-negative")g
             # Note: registration_channel can be empty - will use first available
     
     @property
