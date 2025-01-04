@@ -3,9 +3,8 @@
 import argparse
 import json
 import sys
-from parameters import StitchingParameters
-from coordinate_stitcher import CoordinateStitcher
-from stitcher import Stitcher  # Assuming Stitcher exists for non-coordinate-based stitching
+from stitcher_parameters import StitchingParameters
+from stitcher import Stitcher
 
 def parse_args() -> argparse.Namespace:
     """Parse command-line arguments."""
@@ -94,7 +93,7 @@ def main():
         params = create_params(args)
         
         # Initialize stitcher
-        stitcher = CoordinateStitcher(params)
+        stitcher = Stitcher(params)
         
         # Run stitching process
         print(f"Starting stitching with parameters:")

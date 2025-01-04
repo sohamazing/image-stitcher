@@ -5,9 +5,19 @@ import numpy as np
 from PyQt5.QtWidgets import (QApplication, QWidget, QGridLayout, QHBoxLayout, QVBoxLayout, QPushButton, QLabel, QProgressBar, QComboBox, QMessageBox, QCheckBox, QSpinBox, QLineEdit, QFileDialog)
 from PyQt5.QtCore import QObject, pyqtSignal, Qt
 from napari.utils.colormaps import Colormap, AVAILABLE_COLORMAPS
-from parameters import StitchingParameters
-from coordinate_stitcher import CoordinateStitcher
-from stitcher import CHANNEL_COLORS_MAP, Stitcher 
+from stitcher_parameters import StitchingParameters
+from stitcher import CoordinateStitcher
+
+CHANNEL_COLORS_MAP = {
+    "405": {"hex": 0x3300FF, "name": "blue"},
+    "488": {"hex": 0x1FFF00, "name": "green"},
+    "561": {"hex": 0xFFCF00, "name": "yellow"},
+    "638": {"hex": 0xFF0000, "name": "red"},
+    "730": {"hex": 0x770000, "name": "dark red"},
+    "R": {"hex": 0xFF0000, "name": "red"},
+    "G": {"hex": 0x1FFF00, "name": "green"},
+    "B": {"hex": 0x3300FF, "name": "blue"},
+}
 
 class StitchingGUI(QWidget):
     def __init__(self):
