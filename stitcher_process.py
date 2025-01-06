@@ -186,23 +186,21 @@ class StitcherProcess(Process):
     def cleanup(self):
         """Clean up resources before termination."""
         try:
-            # Close any open file handles
+            # Clear queues
+            for queue in [self.progress_queue, self.status_queue, self.complete_queue]:
+                if queue:
+                    while not queue.empty():
+                        try:
+                            queue.get_nowait()
+                        except Empty:
+                            pass
+
+            # Force garbage collection
             import gc
-            gc.collect()  # Force garbage collection
-
-            # Clear zarr stores if any are open
-            if hasattr(self, 'zarr_stores'):
-                for store in self.zarr_stores:
-                    try:
-                        store.close()
-                    except:
-                        pass
-
-            self.emit_status("Process Stopped...")
+            gc.collect()
 
         except Exception as e:
             print(f"Error during cleanup: {str(e)}")
-            # Continue with termination even if cleanup fails
 
 
     def get_timepoints(self):
