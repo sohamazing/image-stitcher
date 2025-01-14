@@ -55,7 +55,7 @@ class StitchingParameters:
         # Validate registration settings
         if self.use_registration:
             if self.registration_z_level < 0:
-                raise ValueError("Registration Z-level must be non-negative")g
+                raise ValueError("Registration Z-level must be non-negative")
             # Note: registration_channel can be empty - will use first available
     
     @property

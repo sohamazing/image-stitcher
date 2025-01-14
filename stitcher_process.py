@@ -29,11 +29,38 @@ from stitcher_parameters import StitchingParameters
 
 # Cephla-Lab: Squid Microscopy Image Stitcher (soham mukherjee)
 
+def write_chunk_worker(args):
+    """Worker function for parallel chunk writing.
+    
+    Args:
+        args: Tuple containing (chunk_coords, path, data)
+        
+    Returns:
+        Tuple: (success, chunk_info)
+    """
+    try:
+        coords, zarr_path, data_slice = args
+        z_idx, y_idx, x_idx = coords
+        
+        # Open zarr array
+        store = zarr.DirectoryStore(zarr_path)
+        root = zarr.group(store)
+        dataset = root["0"]
+        
+        # Write data
+        dataset[(slice(None),) * 2 + (slice(z_idx, z_idx+1), 
+                slice(y_idx, y_idx+data_slice.shape[3]), 
+                slice(x_idx, x_idx+data_slice.shape[4]))] = data_slice
+        
+        return True, coords
+        
+    except Exception as e:
+        return False, f"Error at chunk {coords}: {str(e)}"
+
 class StitcherProcess(Process):
     def __init__(self, params: StitchingParameters, progress_queue: Queue,
                  status_queue: Queue, complete_queue: Queue, stop_event: Event):
         """Initialize the StitcherProcess.
-
         Args:
             params (StitchingParameters): Configuration parameters for stitching
             progress_queue (Queue): Queue for progress updates
@@ -51,7 +78,7 @@ class StitcherProcess(Process):
 
         # Validate and store parameters
         self.params = params
-        # params.validate() # commented out for save_region_test.py script to bypass actual parameters, add line back after
+        # params.validate() # comment out for save_region_test.py script to bypass actual parameters
 
         # Core attributes from parameters
         self.input_folder = params.input_folder
@@ -130,7 +157,7 @@ class StitcherProcess(Process):
         self.flatfields = {}
         self.acquisition_metadata = {}
         self.dtype = np.uint16
-        self.chunks = (1, 1, 1, 4096, 4096)
+        self.chunks = (1, 1, 1, 2048, 2048) # (1, 1, 1, 4096, 4096)
         self.h_shift = (0, 0)
         if self.scan_pattern == 'S-Pattern':
             self.h_shift_rev = (0, 0)
@@ -141,7 +168,6 @@ class StitcherProcess(Process):
 
     def emit_progress(self, current: int, total: int):
         """Send progress update through queue.
-
         Args:
             current (int): Current progress value
             total (int): Total progress value
@@ -153,7 +179,6 @@ class StitcherProcess(Process):
 
     def emit_status(self, status: str, is_saving: bool = False):
         """Send status update through queue.
-
         Args:
             status (str): Status message
             is_saving (bool): Whether the status is about saving data
@@ -165,7 +190,6 @@ class StitcherProcess(Process):
 
     def emit_complete(self, output_path: str, dtype):
         """Send completion status through queue.
-
         Args:
             output_path (str): Path to the output file
             dtype: Data type of the output
@@ -195,13 +219,14 @@ class StitcherProcess(Process):
                         except Empty:
                             pass
 
-            # Force garbage collection
             import gc
-            gc.collect()
+            gc.collect()  # Force garbage collection
+
+            self.emit_status("Process Stopped...")
 
         except Exception as e:
             print(f"Error during cleanup: {str(e)}")
-
+            # Continue with termination even if cleanup fails
 
     def get_timepoints(self):
         """Get list of timepoints from input directory.
@@ -345,7 +370,6 @@ class StitcherProcess(Process):
         
     def get_region_data(self, t, region):
         """Get region data with consistent filtering.
-
         Args:
             t (int): Timepoint
             region (str): Region identifier
@@ -373,7 +397,6 @@ class StitcherProcess(Process):
 
     def get_channel_color(self, channel_name):
         """Get the color for a given channel.
-
         Args:
             channel_name (str): Name of the channel
 
@@ -397,7 +420,6 @@ class StitcherProcess(Process):
 
     def calculate_output_dimensions(self, timepoint, region):
         """Calculate dimensions for the output image.
-
         Args:
             timepoint (int/str): The timepoint to process
             region (str): The region identifier
@@ -464,7 +486,6 @@ class StitcherProcess(Process):
 
     def init_output(self, timepoint, region):
         """Initialize output array for a region.
-
         Args:
             timepoint: The timepoint to process
             region: The region identifier
@@ -549,7 +570,6 @@ class StitcherProcess(Process):
 
     def calculate_shifts(self, t, region):
         """Calculate registration shifts between tiles.
-
         Args:
             t (int): Timepoint
             region (str): Region identifier
@@ -641,7 +661,6 @@ class StitcherProcess(Process):
 
     def calculate_horizontal_shift(self, img_left, img_right, max_overlap):
         """Calculate horizontal shift between two images using phase correlation.
-
         Args:
             img_left: Left image
             img_right: Right image
@@ -665,7 +684,6 @@ class StitcherProcess(Process):
 
     def calculate_vertical_shift(self, img_top, img_bot, max_overlap):
         """Calculate vertical shift between two images using phase correlation.
-
         Args:
             img_top: Top image
             img_bot: Bottom image
@@ -689,7 +707,6 @@ class StitcherProcess(Process):
 
     def get_tile(self, t, region, x, y, channel, z_level):
         """Get a specific tile using standardized data access.
-
         Args:
             t: Timepoint
             region: Region identifier
@@ -719,7 +736,6 @@ class StitcherProcess(Process):
 
     def place_tile(self, stitched_region, tile, x_pixel, y_pixel, z_level, channel, t):
         """Place a tile in the stitched region.
-
         Args:
             stitched_region: Output array
             tile: Tile image data
@@ -752,7 +768,6 @@ class StitcherProcess(Process):
 
     def place_single_channel_tile(self, stitched_region, tile, x_pixel, y_pixel, z_level, channel_idx, t):
         """Place a single channel tile in the stitched region.
-
         Args:
             stitched_region: Output array
             tile: Single channel tile data
@@ -810,7 +825,6 @@ class StitcherProcess(Process):
 
     def apply_flatfield_correction(self, tile, channel_idx):
         """Apply flatfield correction to a tile.
-
         Args:
             tile: Tile image data
             channel_idx: Channel index
@@ -827,7 +841,6 @@ class StitcherProcess(Process):
 
     def normalize_image(self, img):
         """Normalize image to full dynamic range.
-
         Args:
             img: Input image
 
@@ -841,7 +854,6 @@ class StitcherProcess(Process):
 
     def visualize_image(self, img1, img2, title):
         """Save visualization of image overlaps for debugging.
-
         Args:
             img1: First image
             img2: Second image
@@ -868,7 +880,6 @@ class StitcherProcess(Process):
 
     def stitch_region(self, timepoint, region):
         """Stitch and save single region for a specific timepoint.
-
         Args:
             timepoint: The timepoint to process
             region: The region identifier
@@ -944,7 +955,6 @@ class StitcherProcess(Process):
 
     def save_region_aics(self, timepoint, region, stitched_region):
         """Save stitched region data as OME-ZARR or OME-TIFF using aicsimageio.
-
         Args:
             timepoint: Timepoint being saved
             region: Region identifier
@@ -1026,7 +1036,6 @@ class StitcherProcess(Process):
 
     def save_region_ome_zarr(self, timepoint, region, stitched_region):
         """Save stitched region data as OME-ZARR using direct pyramid writing.
-
         Args:
             timepoint: Timepoint being saved
             region: Region identifier
@@ -1113,106 +1122,135 @@ class StitcherProcess(Process):
         return output_path
 
     def save_region_parallel(self, timepoint, region, stitched_region):
-        """Save stitched region data using Zarr and multiprocessing for parallel writing."""
-        start_time = time.time()
+        """Save stitched region data using Zarr with parallel chunk writing.
+        
+        Args:
+            timepoint: Current timepoint
+            region: Region identifier 
+            stitched_region: Data array to save
 
-        # Configure output path and ensure directory exists
+        Returns:
+            str: Path to saved output file
+        """
+        start_time = time.time()
+        
+        # Configure output path
         output_path = os.path.join(
-            self.output_folder, f"{timepoint}_stitched", f"{region}_stitched{self.output_format}"
+            self.output_folder, 
+            f"{timepoint}_stitched",
+            f"{region}_stitched{self.output_format}"
         )
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
-
-        # Configure Zarr store and dataset
+        
+        # Initialize zarr array
         store = zarr.DirectoryStore(output_path)
         root = zarr.group(store, overwrite=True)
-        chunks = (1, 1, 1, 4096, 4096)
-        compressor = zarr.Blosc(cname="zstd", clevel=1, shuffle=zarr.Blosc.SHUFFLE)
-
+        
+        # Use zstd compression
+        compressor = zarr.Blosc(cname='zstd', clevel=1, shuffle=zarr.Blosc.SHUFFLE)
+        
+        # Create dataset
         dataset = root.create_dataset(
             "0",
             shape=stitched_region.shape,
-            chunks=chunks,
+            chunks=self.chunks,
             dtype=stitched_region.dtype,
-            compressor=compressor,
+            compressor=compressor
         )
 
-        # Helper function to process a single chunk
-        def process_chunk(chunk_coords):
-            """Write a single chunk to the dataset."""
-            try:
-                z, y, x = chunk_coords
-                z_slice = slice(z, z + 1)
-                y_slice = slice(y, min(y + chunks[3], stitched_region.shape[3]))
-                x_slice = slice(x, min(x + chunks[4], stitched_region.shape[4]))
-                for c in range(stitched_region.shape[1]):
-                    dataset[0, c, z_slice, y_slice, x_slice] = stitched_region[
-                        0, c, z_slice, y_slice, x_slice
-                    ]
-                return True
-            except Exception as e:
-                return False, str(e)
+        # Write initial data
+        small_slice = tuple(slice(0, min(c, s)) for c, s in zip(self.chunks, stitched_region.shape))
+        dataset[small_slice] = stitched_region[small_slice]
 
-        # Generate chunk coordinates
-        chunk_coords = [
-            (z, y, x)
-            for z in range(stitched_region.shape[2])  # Z levels
-            for y in range(0, stitched_region.shape[3], chunks[3])  # Y chunks
-            for x in range(0, stitched_region.shape[4], chunks[4])  # X chunks
-        ]
+        # Prepare chunks for parallel processing
+        chunk_args = []
+        for z in range(0, stitched_region.shape[2], self.chunks[2]):
+            for y in range(0, stitched_region.shape[3], self.chunks[3]):
+                for x in range(0, stitched_region.shape[4], self.chunks[4]):
+                    # Calculate chunk boundaries
+                    z_end = min(z + self.chunks[2], stitched_region.shape[2])
+                    y_end = min(y + self.chunks[3], stitched_region.shape[3])
+                    x_end = min(x + self.chunks[4], stitched_region.shape[4])
+                    
+                    # Extract chunk data
+                    chunk_data = stitched_region[:, :, z:z_end, y:y_end, x:x_end]
+                    if isinstance(chunk_data, da.Array):
+                        chunk_data = chunk_data.compute()
+                    
+                    # Create argument tuple
+                    args = ((z, y, x), output_path, chunk_data)
+                    chunk_args.append(args)
 
         # Process chunks in parallel
-        num_workers = max(1, min(os.cpu_count() // 2, 8))
+        num_workers = min(cpu_count() // 2, 8)
+        errors = []
+        total_chunks = len(chunk_args)
+        chunks_processed = 0
+
+        print(f"\nProcessing {total_chunks} chunks using {num_workers} workers...")
+        
         with Pool(num_workers) as pool:
-            results = list(pool.imap_unordered(process_chunk, chunk_coords))
+            try:
+                for result in pool.imap_unordered(write_chunk_worker, chunk_args):
+                    chunks_processed += 1
+                    
+                    if not result[0]:
+                        errors.append(result[1])
+                    
+                    if chunks_processed % 10 == 0:
+                        print(f"Progress: {chunks_processed}/{total_chunks} chunks complete")
+                    
+                    if self.progress_queue:
+                        self.emit_progress(chunks_processed, total_chunks)
+                        
+            except Exception as e:
+                errors.append(str(e))
+                
+        # Handle any errors
+        if errors:
+            error_msg = f"Errors occurred while saving chunks: {errors}"
+            print(error_msg)
+            if self.status_queue:
+                self.status_queue.put(('error', error_msg))
+            raise RuntimeError(error_msg)
 
-        # Check for any errors in chunk processing
-        if not all(r is True for r in results):
-            print("Errors occurred in chunk processing:", results)
+        # Add metadata
+        root.attrs["multiscales"] = [{
+            "datasets": [{
+                "path": "0",
+                "coordinateTransformations": [{
+                    "type": "scale",
+                    "scale": [
+                        1,  # Time
+                        1,  # Channels
+                        float(self.acquisition_params.get("dz(um)", 1.0)),  # Z
+                        float(self.pixel_size_um),  # Y
+                        float(self.pixel_size_um),  # X
+                    ]
+                }]
+            }],
+            "version": "0.4"
+        }]
 
-        # Add metadata to the Zarr store
-        root.attrs["multiscales"] = [
-            {
-                "datasets": [
-                    {
-                        "path": "0",
-                        "coordinateTransformations": [
-                            {
-                                "type": "scale",
-                                "scale": [
-                                    1,  # Time
-                                    1,  # Channels
-                                    float(self.acquisition_params.get("dz(um)", 1.0)),  # Z
-                                    float(self.pixel_size_um),  # Y
-                                    float(self.pixel_size_um),  # X,
-                                ],
-                            }
-                        ],
-                    }
-                ],
-                "version": "0.4",
-            }
-        ]
+        # Add OMERO metadata
         root.attrs["omero"] = {
             "id": 1,
             "name": f"{region}_t{timepoint}",
-            "version": "0.4",
-            "channels": [
-                {
-                    "label": name,
-                    "color": f"{color:06X}",
-                    "window": {
-                        "start": 0,
-                        "end": np.iinfo(self.dtype).max,
-                        "min": 0,
-                        "max": np.iinfo(self.dtype).max,
-                    },
+            "version": "0.4", 
+            "channels": [{
+                "label": name,
+                "color": f"{color:06X}",
+                "window": {
+                    "start": 0,
+                    "end": np.iinfo(self.dtype).max,
+                    "min": 0,
+                    "max": np.iinfo(self.dtype).max
                 }
-                for name, color in zip(self.monochrome_channels, self.monochrome_colors)
-            ],
+            } for name, color in zip(self.monochrome_channels, self.monochrome_colors)]
         }
 
         elapsed = time.time() - start_time
-        print(f"Saved {output_path} in {elapsed:.1f}s")
+        print(f"\nSaved {output_path} in {elapsed:.1f}s using {num_workers} processes")
         return output_path
 
     def save_region_bioio(self, timepoint, region, stitched_region):
@@ -1222,6 +1260,7 @@ class StitcherProcess(Process):
             self.output_folder, f"{timepoint}_stitched", f"{region}_stitched{self.output_format}"
         )
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
+        self.emit_status(f"Saving... (Timepoint:{timepoint} Region:{region})", is_saving=True)
 
         try:
             if self.output_format.endswith('.zarr'):
@@ -1231,7 +1270,8 @@ class StitcherProcess(Process):
                     Y=self.pixel_size_um,
                     X=self.pixel_size_um,
                 )
-                channel_colors = [0x0000FF] * self.num_c  # Default to blue for all channels
+                channel_colors = [[c >> 16, (c >> 8) & 0xFF, c & 0xFF]
+                     for c in self.monochrome_colors]
 
                 writer.write_image(
                     image_data=stitched_region,
@@ -1273,6 +1313,7 @@ class StitcherProcess(Process):
             self.output_folder, f"{timepoint}_stitched", f"{region}_stitched.ome.zarr"
         )
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
+        self.emit_status(f"Saving... (Timepoint:{timepoint} Region:{region})", is_saving=True)
 
         try:
             shapes = compute_level_shapes(stitched_region.shape, (1, 1, 1, 2, 2), self.num_pyramid_levels)
@@ -1299,11 +1340,8 @@ class StitcherProcess(Process):
             self.status_queue.put(('error', f"Error saving region {region}: {str(e)}"))
             raise
 
-
-
     def _save_debug_slice(self, stitched_region, zarr_path):
         """Save a debug RGB image slice for verification.
-
         Args:
             stitched_region: Stitched image data
             zarr_path: Path where debug image will be saved
@@ -1336,7 +1374,6 @@ class StitcherProcess(Process):
 
     def generate_pyramid(self, image, num_levels):
         """Generate image pyramid for efficient visualization.
-
         Args:
             image: Input image data
             num_levels: Number of pyramid levels
@@ -1426,7 +1463,6 @@ class StitcherProcess(Process):
 
     def load_and_merge_timepoints(self, region):
         """Load and merge all timepoints for a specific region.
-
         Args:
             region: Region identifier
 
@@ -1468,7 +1504,6 @@ class StitcherProcess(Process):
 
     def pad_to_largest(self, array, target_shape):
         """Pad array to match target shape.
-
         Args:
             array: Input array
             target_shape: Desired output shape
@@ -1704,7 +1739,6 @@ class StitcherProcess(Process):
 
     def print_zarr_structure(self, path, indent=""):
         """Print the structure of a ZARR file for debugging.
-
         Args:
             path: Path to ZARR file
             indent: Indentation string
