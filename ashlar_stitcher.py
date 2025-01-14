@@ -292,6 +292,7 @@ def main():
         tile_size = (converter.input_width // 16) * 16  # Nearest lower multiple of 16
         cmd = [
             'ashlar',
+            # '--plates',
             '--output', args.output,
             '--tile-size', str(tile_size),
             '--filter-sigma', str(args.filter_sigma),
