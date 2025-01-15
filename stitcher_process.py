@@ -15,6 +15,7 @@ from skimage import exposure
 import ome_zarr
 import zarr
 import imageio
+import pyvips
 from aicsimageio.writers import OmeTiffWriter as aicsTiffWriter
 from aicsimageio.writers import OmeZarrWriter as aicsZarrWriter
 from aicsimageio import types as aics_types
@@ -78,7 +79,7 @@ class StitcherProcess(Process):
 
         # Validate and store parameters
         self.params = params
-        # params.validate() # comment out for save_region_test.py script to bypass actual parameters
+        # params.validate() # comment out for save_region_test.py script to bypass parameter validation
 
         # Core attributes from parameters
         self.input_folder = params.input_folder
@@ -281,14 +282,14 @@ class StitcherProcess(Process):
             # Process each image file
             image_files = sorted(
                 [f for f in os.listdir(image_folder)
-                if f.endswith(('.bmp', '.tiff', 'tif', 'jpg', 'jpeg', 'png')) and 'focus_camera' not in f]
+                if f.endswith(('.bmp', '.tiff', 'tif', 'jpg', 'jpeg', 'png')) 
+                and not f.startswith(".")
+                and 'focus_camera' not in f]
             )
-
             for file in image_files:
                 parts = file.split('_', 3)
                 region, fov, z_level = parts[0], int(parts[1]), int(parts[2])
                 channel = os.path.splitext(parts[3])[0].replace("_", " ").replace("full ", "full_")
-
                 coord_row = coordinates_df[
                     (coordinates_df['region'] == region) &
                     (coordinates_df['fov'] == fov) &
@@ -303,6 +304,7 @@ class StitcherProcess(Process):
 
                 # Create key with actual timepoint value
                 key = (int(timepoint), region, fov, z_level, channel)
+                print(key)
 
                 self.acquisition_metadata[key] = {
                     'filepath': os.path.join(image_folder, file),
@@ -1141,7 +1143,8 @@ class StitcherProcess(Process):
             f"{region}_stitched{self.output_format}"
         )
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
-        
+        self.emit_status(f"Saving... (Timepoint:{timepoint} Region:{region})", is_saving=True)
+
         # Initialize zarr array
         store = zarr.DirectoryStore(output_path)
         root = zarr.group(store, overwrite=True)
@@ -1270,15 +1273,13 @@ class StitcherProcess(Process):
                     Y=self.pixel_size_um,
                     X=self.pixel_size_um,
                 )
-                channel_colors = [[c >> 16, (c >> 8) & 0xFF, c & 0xFF]
-                     for c in self.monochrome_colors]
 
                 writer.write_image(
                     image_data=stitched_region,
                     image_name=f"{region}_t{timepoint}",
                     physical_pixel_sizes=physical_pixel_sizes,
                     channel_names=self.monochrome_channels,
-                    channel_colors=channel_colors,
+                    channel_colors=self.monochrome_colors,
                     chunk_dims=self.chunks,
                     scale_num_levels=self.num_pyramid_levels,
                     scale_factor=2.0,
@@ -1327,9 +1328,9 @@ class StitcherProcess(Process):
             metadata = writer.generate_metadata(
                 image_name=f"{region}_t{timepoint}",
                 channel_names=self.monochrome_channels,
+                channel_colors=self.monochrome_colors,
                 physical_dims={"x": self.pixel_size_um, "y": self.pixel_size_um, "z": 1.0},
-                physical_units={"x": "micrometer", "y": "micrometer", "z": "micrometer"},
-                channel_colors=[0x0000FF] * self.num_c,
+                physical_units={"x": "micrometer", "y": "micrometer", "z": "micrometer"}
             )
             writer.write_metadata(metadata)
 
@@ -1338,6 +1339,213 @@ class StitcherProcess(Process):
             return output_path
         except Exception as e:
             self.status_queue.put(('error', f"Error saving region {region}: {str(e)}"))
+            raise
+
+    def save_region_tiffile(self, timepoint, region, stitched_region):
+        """
+        Save a stitched region as a multi-resolution (pyramidal), multi-series OME-TIFF file.
+
+        Args:
+            timepoint: Current timepoint being saved.
+            region: Region identifier.
+            stitched_region: Image data in TCZYX format.
+
+        Returns:
+            str: Path to the saved file.
+        """
+        from skimage.transform import downscale_local_mean
+        from tifffile import TiffWriter
+
+        # Output path
+        output_path = f"{self.output_folder}/{timepoint}_stitched/{region}_stitched.ome.tif"
+
+        # Ensure metadata and configuration values are available from self
+        pixel_size_um = self.pixel_size_um
+        channel_names = self.monochrome_channels
+        channel_colors = self.monochrome_colors
+        num_pyramid_levels = self.num_pyramid_levels
+        dtype = self.dtype
+
+        # Metadata
+        metadata = {
+            'axes': 'TCZYX',
+            'SignificantBits': 8 if dtype == np.uint8 else 16,
+            'PhysicalSizeX': pixel_size_um,
+            'PhysicalSizeXUnit': 'µm',
+            'PhysicalSizeY': pixel_size_um,
+            'PhysicalSizeYUnit': 'µm',
+            'Channel': {'Name': channel_names},
+            'Description': f"Region {region}, Timepoint {timepoint}",
+            'MapAnnotation': {  # For OMERO metadata
+                'Namespace': 'openmicroscopy.org/PyramidResolution',
+                **{f"{i}": f"{stitched_region.shape[4] // (2 ** i)} {stitched_region.shape[3] // (2 ** i)}" 
+                   for i in range(num_pyramid_levels)}
+            }
+        }
+
+        # Options for TiffWriter
+        options = dict(
+            photometric='minisblack',
+            tile=(128, 128),
+            compression='lzw',
+            resolutionunit='CENTIMETER',
+            maxworkers=2,
+        )
+
+        # Save the OME-TIFF
+        with TiffWriter(output_path, bigtiff=True) as tif:
+            # Write the base resolution
+            tif.write(
+                stitched_region,
+                subifds=num_pyramid_levels,
+                resolution=(1e4 / pixel_size_um, 1e4 / pixel_size_um),
+                metadata=metadata,
+                **options,
+            )
+            # Write pyramid levels
+            for level in range(1, num_pyramid_levels + 1):
+                mag = 2 ** level
+                downsampled = downscale_local_mean(
+                    stitched_region,
+                    factors=(1, 1, 1, mag, mag),
+                ).astype(dtype)
+                tif.write(
+                    downsampled,
+                    subfiletype=1,
+                    resolution=(1e4 / (mag * pixel_size_um), 1e4 / (mag * pixel_size_um)),
+                    **options,
+                )
+
+            # Generate and write a thumbnail (optional)
+            thumbnail = (stitched_region[0, 0, 0, ::8, ::8] >> (8 if dtype == np.uint16 else 0)).astype(np.uint8)
+            tif.write(
+                thumbnail,
+                metadata={'Name': f"{region}_t{timepoint}_thumbnail"},
+            )
+
+        print(f"Saved OME-TIFF to {output_path}")
+        return output_path
+
+    def save_region_vips(self, timepoint, region, stitched_region):
+        """
+        Save stitched region data using pyvips for efficient tiled pyramidal TIFF output.
+
+        Args:
+            timepoint: Timepoint being saved
+            region: Region identifier
+            stitched_region: Stitched image data
+
+        Returns:
+            str: Path to saved output file
+        """
+        start_time = time.time()
+
+        # Configure output path
+        output_path = os.path.join(
+            self.output_folder,
+            f"{timepoint}_stitched",
+            f"{region}_stitched{self.output_format}"
+        )
+        os.makedirs(os.path.dirname(output_path), exist_ok=True)
+        self.emit_status(f"Saving with pyvips... (Timepoint:{timepoint} Region:{region})", is_saving=True)
+
+        try:
+            # Convert dask array to numpy if needed
+            if isinstance(stitched_region, da.Array):
+                data = stitched_region.compute()
+            else:
+                data = stitched_region
+
+            # Ensure data is 5D: (T, C, Z, Y, X)
+            if len(data.shape) != 5:
+                raise ValueError(f"Expected data with 5 dimensions (TCZYX), got shape: {data.shape}")
+
+            # Create a list of pyvips images for each z-level
+            z_level_images = []
+            for z in range(self.num_z):
+                # Create a list of vips bands (one per channel) for this z-level
+                channel_bands = []
+                for c in range(self.num_c):
+                    # Extract the slice and ensure it's contiguous
+                    slice_data = np.ascontiguousarray(data[0, c, z])
+
+                    # Create a vips image for the channel
+                    vips_band = pyvips.Image.new_from_memory(
+                        slice_data.tobytes(),
+                        width=slice_data.shape[1],
+                        height=slice_data.shape[0],
+                        bands=1,
+                        format=pyvips.BandFormat.USHORT if self.dtype == np.uint16 else pyvips.BandFormat.UCHAR
+                    )
+                    channel_bands.append(vips_band)
+
+                # Band join the channels for this z-level
+                z_image = channel_bands[0].bandjoin(channel_bands[1:])
+                z_level_images.append(z_image)
+
+            # Page join the z-levels
+            final_image = z_level_images[0].pagejoin(z_level_images[1:])
+
+            # Set page height for proper pyramid generation
+            final_image = final_image.copy()
+            final_image.set_type(pyvips.GValue.gint_type, "page-height", data.shape[3])
+
+            # Set OME-TIFF metadata
+            ome_metadata = f"""<?xml version="1.0" encoding="UTF-8"?>
+            <OME xmlns="http://www.openmicroscopy.org/Schemas/OME/2016-06"
+                xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                xsi:schemaLocation="http://www.openmicroscopy.org/Schemas/OME/2016-06 http://www.openmicroscopy.org/Schemas/OME/2016-06/ome.xsd">
+                <Image ID="Image:0" Name="{region}_t{timepoint}">
+                    <Pixels DimensionOrder="ZCYX"
+                            ID="Pixels:0"
+                            PhysicalSizeX="{self.pixel_size_um}"
+                            PhysicalSizeY="{self.pixel_size_um}"
+                            PhysicalSizeZ="{self.acquisition_params.get('dz(um)', 1.0)}"
+                            PhysicalSizeXUnit="µm"
+                            PhysicalSizeYUnit="µm"
+                            PhysicalSizeZUnit="µm"
+                            SizeC="{self.num_c}"
+                            SizeT="1"
+                            SizeX="{data.shape[4]}"
+                            SizeY="{data.shape[3]}"
+                            SizeZ="{self.num_z}"
+                            Type="{str(self.dtype)[4:]}">
+                    </Pixels>
+                </Image>
+            </OME>"""
+            final_image.set_type(pyvips.GValue.gstr_type, "image-description", ome_metadata)
+
+            # Calculate resolution in pixels/mm
+            pixels_per_mm = 1000 / self.pixel_size_um
+
+            # Save as pyramidal OME-TIFF
+            final_image.tiffsave(
+                output_path,
+                compression='jpeg',       # Use JPEG compression
+                bigtiff=True,             # Enable BigTIFF for large files
+                pyramid=True,             # Enable pyramidal TIFF
+                subifd=True,              # Store pyramid levels in sub-IFDs
+                tile=True,                # Enable tiling
+                tile_width=256,           # Tile width
+                tile_height=256,          # Tile height
+                depth='onetile',          # Use single tile depth
+                xres=pixels_per_mm,       # X resolution in pixels/mm
+                yres=pixels_per_mm,       # Y resolution in pixels/mm
+                resunit='cm',             # Resolution unit (e.g., cm, mm)
+                predictor='horizontal'    # Use horizontal predictor for compression
+            )
+
+            elapsed = time.time() - start_time
+            print(f"\nSaved {output_path} in {elapsed:.1f}s using pyvips")
+            print(f"Dimensions: {data.shape[4]}x{data.shape[3]}, {self.num_c} channels, {self.num_z} z-levels")
+            print(f"Pixel size: {self.pixel_size_um}µm, Resolution: {pixels_per_mm} pixels/mm")
+            return output_path
+
+        except Exception as e:
+            error_msg = f"Error saving with pyvips: {str(e)}"
+            print(error_msg)
+            if self.status_queue:
+                self.status_queue.put(('error', error_msg))
             raise
 
     def _save_debug_slice(self, stitched_region, zarr_path):
@@ -1759,6 +1967,7 @@ class StitcherProcess(Process):
             self.get_pixel_size()
             self.parse_acquisition_metadata()
             os.makedirs(self.output_folder, exist_ok=True)
+            last_path = ""
 
             if self.apply_flatfield:
                 self.get_flatfields()
@@ -1780,18 +1989,25 @@ class StitcherProcess(Process):
                     # Stitch region
                     stitched_region = self.stitch_region(timepoint, region)
 
+                    # Convert dask array to numpy if needed
+                    if isinstance(stitched_region, da.Array):
+                        stitched_region = stitched_region.compute()
+
                     # Save region
                     if self.output_format.endswith('.zarr'):
                     #     output_path = self.save_region_ome_zarr(timepoint, region, stitched_region) # zarr
                     #     output_path = self.save_region_aics(timepoint, region, stitched_region) # zarr or tiff
-                    #     output_path = self.save_region_bioio(timepoint, region, stitched_region) # zarr or tiff
-                        output_path = self.save_region_bioio_2(timepoint, region, stitched_region) # zarr
+                        output_path = self.save_region_bioio(timepoint, region, stitched_region) # zarr or tiff
+                    #     output_path = self.save_region_bioio_2(timepoint, region, stitched_region) # zarr
                     #     output_path = self.save_region_parallel(timepoint, region, stitched_region) # zarr # TO FIX
 
                     else:
-                        output_path = self.save_region_aics(timepoint, region, stitched_region) # zarr or tiff
+                    #     output_path = self.save_region_aics(timepoint, region, stitched_region) # zarr or tiff
                     #     output_path = self.save_region_bioio(timepoint, region, stitched_region) # zarr or tiff
+                    #     output_path = self.save_region_tiffile(timepoint, region, stitched_region) # tiff
+                        output_path = self.save_region_vips(timepoint, region, stitched_region) # tiff
 
+                    last_path = output_path
                     print(f"Completed region {region} in {time.time() - rtime:.1f}s")
 
                 print(f"Completed timepoint {timepoint} in {time.time() - ttime:.1f}s")
@@ -1810,12 +2026,8 @@ class StitcherProcess(Process):
                 self.create_hcs_ome_zarr_per_timepoint()
 
             else:
-                final_path = os.path.join( # emit path to last stitched image
-                    self.output_folder,
-                    f"{self.timepoints[-1]}_stitched",
-                    f"{self.regions[-1]}_stitched{self.output_format}"
-                )
-                self.emit_complete(final_path, self.dtype)
+                self.print_zarr_structure(last_path)
+                self.emit_complete(last_path, self.dtype)
 
             print(f"Processing complete. Total time: {time.time() - stime:.1f}s")
 
