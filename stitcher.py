@@ -1008,10 +1008,6 @@ class Stitcher(QThread):
     def create_hcs_ome_zarr_per_timepoint(self):
         """Create separate HCS OME-ZARR files for each timepoint."""
         for t in self.timepoints:
-            
-            print(t)
-            print(self.timepoints)
-            print(self.merged_hcs_output_template)
             output_path = self.merged_hcs_output_template.format(timepoint=t)
             
             store = ome_zarr.io.parse_url(output_path, mode="w").store
