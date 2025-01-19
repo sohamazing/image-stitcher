@@ -1008,8 +1008,7 @@ class Stitcher(QThread):
     def create_hcs_ome_zarr_per_timepoint(self):
         """Create separate HCS OME-ZARR files for each timepoint."""
         for t in self.timepoints:
-            
-            output_path = self.merged_hcs_output_template.format(t)
+            output_path = self.merged_hcs_output_template.format(timepoint=t)
             
             store = ome_zarr.io.parse_url(output_path, mode="w").store
             root = zarr.group(store=store)
@@ -1040,7 +1039,7 @@ class Stitcher(QThread):
                 # Load existing timepoint-region data
                 region_path = os.path.join(self.output_folder, 
                                          f"{t}_stitched",
-                                         f"{region}_{self.output_name}")
+                                         f"{region}_stitched.ome.zarr")
                 
                 if not os.path.exists(region_path):
                     print(f"Warning: Missing data for timepoint {t}, region {region}")
