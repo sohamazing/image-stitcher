@@ -6,7 +6,7 @@ from PyQt5.QtWidgets import (QApplication, QWidget, QGridLayout, QHBoxLayout, QV
 from PyQt5.QtCore import QObject, pyqtSignal, Qt
 from napari.utils.colormaps import Colormap, AVAILABLE_COLORMAPS
 from stitcher_parameters import StitchingParameters
-from stitcher import CoordinateStitcher
+from stitcher import Stitcher as CoordinateStitcher
 
 CHANNEL_COLORS_MAP = {
     "405": {"hex": 0x3300FF, "name": "blue"},
